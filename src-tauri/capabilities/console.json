@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "console-bridge",
+  "description": "Lets the hidden console window report server-function results back to the app. No filesystem/OS access is granted.",
+  "windows": ["console", "signin"],
+  "remote": {
+    "urls": ["https://opencode.ai", "https://*.opencode.ai"]
+  },
+  "permissions": ["core:event:default"]
+}

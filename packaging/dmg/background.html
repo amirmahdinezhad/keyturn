@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 660px; height: 400px; overflow: hidden; }
+  body {
+    font-family: "Figtree", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    background:
+      radial-gradient(120% 90% at 50% -10%, #26241f 0%, rgba(38,36,31,0) 62%),
+      linear-gradient(180deg, #1c1a18 0%, #131211 100%);
+    color: #e8e6e3;
+    position: relative;
+    -webkit-font-smoothing: antialiased;
+  }
+  .title {
+    position: absolute; left: 0; right: 0; top: 40px;
+    text-align: center;
+    font-size: 30px; font-weight: 600; letter-spacing: -0.2px;
+    color: #ffffff;
+  }
+  .subtitle {
+    position: absolute; left: 0; right: 0; top: 82px;
+    text-align: center;
+    font-size: 13px; font-weight: 400; color: #9a968f;
+  }
+  .arrow {
+    position: absolute; left: 0; right: 0; top: 152px;
+    display: flex; justify-content: center;
+  }
+  .rule {
+    position: absolute; left: 0; right: 0; top: 356px;
+    text-align: center;
+    font-size: 11px; color: #6b6760;
+  }
+</style>
+</head>
+<body>
+  <div class="title">Keyturn</div>
+  <div class="subtitle">Drag to Applications to install</div>
+  <div class="arrow">
+    <svg width="160" height="36" viewBox="0 0 160 36" fill="none" aria-hidden="true">
+      <path d="M2 18h140" stroke="#007aff" stroke-width="2" stroke-linecap="round" opacity="0.55"/>
+      <path d="M134 8l12 10-12 10" stroke="#007aff" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+    </svg>
+  </div>
+  <div class="rule">Requires macOS 12 or later</div>
+</body>
+</html>

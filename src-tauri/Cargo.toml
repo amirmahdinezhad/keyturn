@@ -1,0 +1,52 @@
+[package]
+name = "keyturn"
+version = "0.1.0"
+description = "Menubar API-key manager for OpenCode"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "keyturn_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
+tauri-plugin-notification = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+reqwest = { version = "0.13", features = ["json", "blocking"] }
+futures = "0.3"
+dirs = "7"
+chrono = "0.4"
+
+keyring_crate = { package = "keyring", version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.8"
+url = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+
+# Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
