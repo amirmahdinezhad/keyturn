@@ -1,7 +1,7 @@
 //! History ranges, chart buckets and JSON/CSV export.
 //!
-//! Everything is derived from the same local usage DB and the profile's switch
-//! log, so history follows the active profile for free.
+//! Everything is derived from the same local usage DB, so history follows
+//! the active profile for free.
 
 use chrono::{Datelike, Local, TimeZone};
 use serde::Serialize;
@@ -9,8 +9,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::paths;
-use crate::store::Store;
-use crate::usage::{self, KeyTimeline, UsageEntry};
+use crate::usage::{self, UsageEntry};
 
 pub const RANGES: &[&str] = &["5h", "24h", "7d", "30d", "billing"];
 
@@ -35,7 +34,6 @@ pub struct HistoryOut {
     pub total_cost: f64,
     pub total_tokens: f64,
     pub models: BTreeMap<String, f64>,
-    pub key: Option<String>,
     pub error: Option<String>,
 }
 
@@ -81,14 +79,11 @@ pub fn range_spec(range: &str, billing_day: u32, now: i64) -> (i64, i64, i64, St
 /// Build zero-filled buckets covering the whole range.
 pub fn build(
     entries: &[UsageEntry],
-    store: &Store,
     range: &str,
-    key: Option<&str>,
     billing_day: u32,
     now: i64,
 ) -> HistoryOut {
     let (start, end, bucket_ms, label) = range_spec(range, billing_day, now);
-    let timeline = KeyTimeline::new(store);
     let count = (((end - start) / bucket_ms).max(1) + 1) as usize;
     let mut buckets = vec![
         HistoryBucket {
@@ -108,23 +103,6 @@ pub fn build(
     for row in entries {
         if row.t < start || row.t >= end {
             continue;
-        }
-        if let Some(wanted) = key {
-            let stored_keys: Vec<&String> = store
-                .providers
-                .get(&row.provider)
-                .map(|p| p.keys.keys().collect())
-                .unwrap_or_default();
-            let resolved = timeline.key_at(&row.provider, row.t).or_else(|| {
-                if stored_keys.len() == 1 {
-                    Some(stored_keys[0].clone())
-                } else {
-                    None
-                }
-            });
-            if resolved.as_deref() != Some(wanted) {
-                continue;
-            }
         }
         let index = (((row.t - start) / bucket_ms).max(0) as usize).min(count - 1);
         buckets[index].cost += row.cost;
@@ -149,7 +127,6 @@ pub fn build(
         total_cost,
         total_tokens,
         models,
-        key: key.map(str::to_string),
         error: None,
     }
 }
@@ -202,7 +179,6 @@ pub fn serialize(out: &HistoryOut, format: &str) -> Result<String, String> {
             "label": out.label,
             "start": iso(out.start),
             "end": iso(out.end),
-            "key": out.key,
             "totalCost": out.total_cost,
             "totalTokens": out.total_tokens,
             "models": out.models,
@@ -235,48 +211,6 @@ pub fn read_entries() -> (Vec<UsageEntry>, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{Cred, LogEntry, ProviderEntry, Settings, Store};
-
-    fn store() -> Store {
-        let mut providers = BTreeMap::new();
-        providers.insert(
-            "opencode-go".to_string(),
-            ProviderEntry {
-                keys: [
-                    (
-                        "personal".to_string(),
-                        Cred {
-                            cred_type: "api".to_string(),
-                            key: "a".to_string(),
-                            account: None,
-                        },
-                    ),
-                    (
-                        "work".to_string(),
-                        Cred {
-                            cred_type: "api".to_string(),
-                            key: "b".to_string(),
-                            account: None,
-                        },
-                    ),
-                ]
-                .into_iter()
-                .collect(),
-                active: Some("work".to_string()),
-            },
-        );
-        Store {
-            providers,
-            log: vec![LogEntry {
-                t: 1_000,
-                provider: "opencode-go".to_string(),
-                key: "work".to_string(),
-                action: "switch".to_string(),
-                prev: Some("personal".to_string()),
-            }],
-            settings: Settings::default(),
-        }
-    }
 
     fn entry(cost: f64, tokens: f64, t: i64) -> UsageEntry {
         UsageEntry {
@@ -303,38 +237,23 @@ mod tests {
     }
 
     #[test]
-    fn buckets_are_zero_filled_and_key_filtered() {
+    fn buckets_are_zero_filled_over_the_range() {
         let now = 1_700_000_000_000;
-        let mut store = store();
-        // Switch to "work" three hours ago; "personal" owned everything before.
-        store.log[0].t = now - 3 * 3_600_000;
         let entries = vec![
-            entry(2.0, 100.0, now - 60_000),         // work (after the switch)
-            entry(3.0, 200.0, now - 4 * 3_600_000),  // personal (before the switch)
+            entry(2.0, 100.0, now - 60_000),
+            entry(3.0, 200.0, now - 4 * 3_600_000),
             entry(9.0, 900.0, now - 40 * 3_600_000), // outside 5h
         ];
-        let out = build(&entries, &store, "5h", None, 1, now);
+        let out = build(&entries, "5h", 1, now);
         assert!((out.total_cost - 5.0).abs() < 1e-9);
         assert_eq!(out.buckets.len(), 61);
         assert_eq!(out.buckets.iter().filter(|b| b.cost > 0.0).count(), 2);
-
-        let work = build(&entries, &store, "5h", Some("work"), 1, now);
-        assert!((work.total_cost - 2.0).abs() < 1e-9);
-        let personal = build(&entries, &store, "5h", Some("personal"), 1, now);
-        assert!((personal.total_cost - 3.0).abs() < 1e-9);
     }
 
     #[test]
     fn csv_and_json_exports_carry_the_totals() {
         let now = 1_700_000_000_000;
-        let out = build(
-            &[entry(1.5, 42.0, now - 1_000)],
-            &store(),
-            "24h",
-            None,
-            1,
-            now,
-        );
+        let out = build(&[entry(1.5, 42.0, now - 1_000)], "24h", 1, now);
         let csv = to_csv(&out);
         assert!(csv.starts_with("bucket_start,bucket_end,cost,tokens"));
         assert!(csv.contains("total,,1.500000,42"));

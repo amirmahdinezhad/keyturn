@@ -91,13 +91,12 @@ lives in the lib so integration tests can link against it. Keep it that way.
 
 ## Not covered
 
-- **End-to-end / UI automation.** The menubar panel, tray icon and console
-  webview need the app running and a real display; there is no
-  `tauri-driver`/WebDriver harness yet. The pieces with logic were extracted
-  behind seams instead (see `bridge.rs`, `tray.rs`, `providers.rs`) so unit and
-  integration tests carry the weight.
-- **Live quota fetching** against a real provider. `live_smoke` is gated behind
-  `KEYTURN_LIVE_SMOKE=1` and is opt-in.
+- **End-to-end / UI automation.** The menubar panel and tray icon need the app
+  running and a real display; there is no `tauri-driver`/WebDriver harness yet.
+  The pieces with logic were extracted behind seams instead (see `cli.rs`)
+  so unit and integration tests carry the weight.
+- **Live CLI probing** against real provider CLIs. `cli::all_status` runs real
+  subprocesses; tests cover parsing with synthetic inputs instead.
 
 ## Adding a test
 

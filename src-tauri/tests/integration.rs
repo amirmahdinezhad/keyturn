@@ -4,18 +4,15 @@
 //! React frontend depends on, and the public store/profiles/filesystem surface
 //! as an outside consumer sees it.
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
 
+use keyturn_lib::cli::ProviderCliStatus;
 use keyturn_lib::profiles::{self, AppSettings, ProfileRef};
-use keyturn_lib::providers::{self, AuthTarget};
-use keyturn_lib::store::{self, Cred, ProviderEntry, Store};
-use keyturn_lib::usage::{Bucket, KeyQuota, QuotaWindow};
-use keyturn_lib::{paths, AppState, Month, ProviderView, SettingsOut, UsageOut};
-use serde_json::{json, Value};
+use keyturn_lib::{paths, AppState, SettingsOut};
+use serde_json::json;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -63,58 +60,11 @@ fn isolated_user_data() -> &'static Path {
 // ---------- the IPC contract ----------
 
 fn sample_state() -> AppState {
-    let mut providers = BTreeMap::new();
-    providers.insert(
-        "opencode".to_string(),
-        ProviderView {
-            keys: BTreeMap::from([(
-                "main".to_string(),
-                Cred {
-                    cred_type: "api".into(),
-                    key: "sk-1".into(),
-                    account: None,
-                },
-            )]),
-            active: Some("main".to_string()),
-        },
-    );
-
-    let mut windows = Vec::new();
-    windows.push(QuotaWindow {
-        window: "rolling".into(),
-        percent: 40.0,
-        resets_at: None,
-        status: Some("ok".into()),
-    });
-
     AppState {
-        providers,
-        discovered: vec!["custom".into()],
-        applied: BTreeMap::from([("opencode".to_string(), Some("main".to_string()))]),
-        usage: UsageOut {
-            by_key: BTreeMap::from([(
-                "opencode".to_string(),
-                BTreeMap::from([("main".to_string(), Bucket::default())]),
-            )]),
-            untracked: BTreeMap::new(),
-            error: None,
-        },
-        provider_usage: BTreeMap::from([(
-            "opencode".to_string(),
-            BTreeMap::from([(
-                "main".to_string(),
-                KeyQuota {
-                    windows: Some(windows),
-                    error: None,
-                },
-            )]),
-        )]),
         settings: SettingsOut {
             open_at_login: true,
             theme: "dark".into(),
         },
-        custom_providers: vec!["custom".into()],
-        month: Month { year: 2026, month: 8 },
         profiles: vec![ProfileRef {
             id: "default".into(),
             name: "Default".into(),
@@ -130,43 +80,17 @@ fn app_state_serializes_to_the_frontend_contract() {
     let obj = value.as_object().expect("AppState is an object");
 
     // Renaming a field here silently breaks src/types.ts, so pin the exact set.
+    // Auth fields (providers, applied, providerUsage, …) are gone by design:
+    // the CLIs own auth, Keyturn only shows their status via `cli_status`.
     let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
     keys.sort_unstable();
-    let mut expected = [
-        "providers",
-        "discovered",
-        "applied",
-        "usage",
-        "providerUsage",
-        "settings",
-        "customProviders",
-        "month",
-        "profiles",
-        "activeProfile",
-        "app",
-    ];
+    let mut expected = ["settings", "profiles", "activeProfile", "app"];
     expected.sort_unstable();
     assert_eq!(keys, expected, "AppState field names are the IPC contract");
 
     assert_eq!(obj["settings"], json!({ "openAtLogin": true, "theme": "dark" }));
-    assert_eq!(obj["month"], json!({ "year": 2026, "month": 8 }));
     assert_eq!(obj["activeProfile"], json!("default"));
-    assert_eq!(obj["customProviders"], json!(["custom"]));
-    assert_eq!(obj["applied"]["opencode"], json!("main"));
     assert_eq!(obj["profiles"][0], json!({ "id": "default", "name": "Default" }));
-
-    let usage = obj["usage"].as_object().expect("usage object");
-    assert!(usage.contains_key("byKey"));
-    assert!(usage.contains_key("untracked"));
-    assert!(usage.contains_key("error"));
-
-    let quota = &obj["providerUsage"]["opencode"]["main"];
-    assert_eq!(quota["windows"][0]["window"], json!("rolling"));
-    assert_eq!(quota["windows"][0]["percent"], json!(40.0));
-    // The frontend reads `resetsAt`, not `resets_at`.
-    assert_eq!(quota["windows"][0]["resetsAt"], Value::Null);
-    assert!(quota["windows"][0].get("resets_at").is_none());
-    assert_eq!(quota["error"], Value::Null);
 }
 
 #[test]
@@ -176,90 +100,73 @@ fn app_settings_keys_are_camel_case_for_the_ui() {
 
     let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
     keys.sort_unstable();
-    let mut expected = [
-        "resetDisplay",
-        "usagePercentMode",
-        "timeFormat",
-        "refreshIntervalSecs",
-        "autoSwitch",
-        "notifyEnabled",
-        "notifyThresholds",
-        "notifyCustom",
-        "soundEnabled",
-        "soundName",
-        "trayStyle",
-        "trayColorMode",
-        "trayCustomColor",
-        "trayUsedMode",
-        "trayShowRemaining",
-        "trayShowLabels",
-        "trayShowPace",
-        "trayMetrics",
-        "trayPrimary",
-        "trayMulti",
-        "trayProfiles",
-        "trayActiveIndicator",
-        "billingDay",
-        "autoUpdateChecks",
-    ];
+    let mut expected = ["refreshIntervalSecs", "billingDay", "autoUpdateChecks"];
     expected.sort_unstable();
     assert_eq!(keys, expected, "AppSettings field names are the IPC contract");
 }
 
-// ---------- provider registry ----------
+// ---------- CLI status contract (replaces the provider registry) ----------
 
 #[test]
-fn every_registered_provider_is_well_formed() {
-    let specs = providers::all();
-    assert!(!specs.is_empty(), "the registry must not be empty");
+fn cli_status_covers_the_four_supported_clis() {
+    let statuses = keyturn_lib::cli::all_status();
+    let ids: Vec<&str> = statuses.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, vec!["claude", "codex", "opencode", "gemini"]);
 
-    let mut seen = BTreeSet::new();
-    for spec in specs {
-        assert!(seen.insert(spec.id), "duplicate provider id: {}", spec.id);
-        assert!(!spec.id.is_empty());
-        assert!(!spec.label.is_empty(), "{} has no label", spec.id);
-
-        // The lookup helpers must agree with the spec we just walked.
-        assert_eq!(providers::by_id(spec.id).expect("lookup").id, spec.id);
-        assert_eq!(providers::usage_api(spec.id).is_some(), spec.usage_api.is_some());
-
-        let caps = providers::capabilities(spec.id);
-        assert_eq!(
-            caps.token_refresh,
-            spec.auth == AuthTarget::Codex,
-            "{} token_refresh disagrees with its auth target",
-            spec.id
-        );
-        assert_eq!(
-            caps.auth_patch,
-            spec.auth != AuthTarget::None,
-            "{} auth_patch disagrees with its auth target",
-            spec.id
-        );
-
-        // Anything the picker offers as connectable needs somewhere to land.
-        if spec.connectable {
-            assert!(!spec.host.is_empty(), "{} is connectable without a host", spec.id);
-            assert!(
-                !spec.home_url.is_empty(),
-                "{} is connectable without a console home",
-                spec.id
-            );
-        }
+    for s in &statuses {
+        assert!(!s.label.is_empty(), "{} has no label", s.id);
+        assert!(!s.binary.is_empty(), "{} has no binary", s.id);
+        assert!(!s.login_cmd.is_empty(), "{} has no login command", s.id);
+        assert!(!s.install_url.is_empty(), "{} has no install url", s.id);
     }
 }
 
 #[test]
-fn unknown_providers_get_the_conservative_default() {
-    let caps = providers::capabilities("totally-unknown");
-    assert!(!caps.console);
-    assert!(!caps.usage_api);
-    assert!(!caps.auth_patch);
-    assert!(!caps.token_refresh);
-
-    assert!(providers::by_id("totally-unknown").is_none());
-    assert!(providers::usage_api("totally-unknown").is_none());
-    assert!(providers::console_home("totally-unknown").is_none());
+fn cli_status_serializes_to_the_frontend_contract() {
+    let status = ProviderCliStatus {
+        id: "claude".into(),
+        label: "Claude".into(),
+        binary: "claude".into(),
+        binary_found: true,
+        binary_path: Some("/opt/homebrew/bin/claude".into()),
+        version: Some("2.1.220".into()),
+        logged_in: Some(true),
+        auth_method: Some("claude.ai".into()),
+        email: Some("dev@example.com".into()),
+        account: None,
+        detail: Some("Logged in via claude.ai".into()),
+        login_cmd: "claude auth login".into(),
+        install_url: "https://claude.com/product/claude-code".into(),
+        auth_file: None,
+        connected: Vec::new(),
+    };
+    let value = serde_json::to_value(&status).expect("serialize");
+    let obj = value.as_object().expect("status is an object");
+    let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    let mut expected = [
+        "id",
+        "label",
+        "binary",
+        "binaryFound",
+        "binaryPath",
+        "version",
+        "loggedIn",
+        "authMethod",
+        "email",
+        "detail",
+        "loginCmd",
+        "installUrl",
+    ];
+    expected.sort_unstable();
+    assert_eq!(keys, expected, "ProviderCliStatus field names are the IPC contract");
+    assert_eq!(obj["binaryFound"], json!(true));
+    assert_eq!(obj["loginCmd"], json!("claude auth login"));
+    // `connected` is skipped when empty so OpenCode-only noise stays out.
+    assert!(obj.get("connected").is_none());
+    // `None` optionals are skipped the same way.
+    assert!(obj.get("account").is_none());
+    assert!(obj.get("authFile").is_none());
 }
 
 // ---------- filesystem helpers ----------
@@ -286,53 +193,32 @@ fn atomic_writes_are_owner_only_and_round_trip() {
     assert!(leftovers.is_empty(), "temp file left behind: {leftovers:?}");
 }
 
-// ---------- store ----------
+// ---------- store (settings only; keys were removed with CLI-owned auth) ----------
 
 #[test]
-fn keys_survive_a_round_trip_and_deleting_the_active_one_clears_it() {
+fn store_round_trips_settings_and_compacts_legacy_keys() {
     let dir = TempDir::new();
     let file = dir.file();
 
-    store::update_store(&file, |s| {
-        store::upsert_key(s, "opencode", "main", "sk-1", "")?;
-        store::upsert_key(s, "opencode", "side", "sk-2", "me@example.com")?;
-        store::apply_key(s, "opencode", "main", 1_700_000_000_000, None)
+    keyturn_lib::store::update_store(&file, |s| {
+        s.settings.open_at_login = true;
+        Ok(())
     })
-    .expect("save keys");
+    .expect("save settings");
 
-    let loaded = store::read_store(&file);
-    let entry = loaded.providers.get("opencode").expect("provider entry");
-    assert_eq!(entry.keys.len(), 2);
-    assert_eq!(entry.keys["main"].key, "sk-1");
-    assert_eq!(entry.keys["side"].account.as_deref(), Some("me@example.com"));
-    assert_eq!(entry.active.as_deref(), Some("main"));
+    let loaded = keyturn_lib::store::read_store(&file);
+    assert!(loaded.settings.open_at_login);
 
-    store::update_store(&file, |s| store::delete_key(s, "opencode", "main")).expect("delete key");
-
-    let after = store::read_store(&file);
-    let entry = after.providers.get("opencode").expect("provider entry");
-    assert!(!entry.keys.contains_key("main"));
-    assert_eq!(
-        entry.active.as_deref(),
-        Some("side"),
-        "deleting the active key must re-point it, not leave it dangling"
-    );
-
-    // Removing the last key drops the provider entirely.
-    store::update_store(&file, |s| store::delete_key(s, "opencode", "side")).expect("delete last");
-    assert!(!store::read_store(&file).providers.contains_key("opencode"));
-}
-
-#[test]
-fn malformed_key_names_are_rejected_rather_than_written() {
-    let mut store = Store::default();
-    assert!(store::upsert_key(&mut store, "opencode", "bad/name", "sk-1", "").is_err());
-    assert!(store::upsert_key(&mut store, "opencode", "   ", "sk-1", "").is_err());
-    assert!(store::upsert_key(&mut store, "opencode", "fine_name-1", "", "").is_err());
-    assert!(store::upsert_key(&mut store, "opencode", "fine_name-1", "sk-1", "").is_ok());
-
-    let entry: &ProviderEntry = store.providers.get("opencode").expect("provider entry");
-    assert_eq!(entry.keys.len(), 1);
+    // A v2 file full of keys comes back slim, then is compacted on disk.
+    std::fs::write(
+        &file,
+        r#"{"providers":{"p":{"keys":{"a":{"key":"k"}}}},"log":[],"settings":{"openAtLogin":false}}"#,
+    )
+    .unwrap();
+    assert!(keyturn_lib::store::compact_legacy(&file));
+    let raw = std::fs::read_to_string(&file).unwrap();
+    assert!(!raw.contains("providers"));
+    assert!(!keyturn_lib::store::compact_legacy(&file));
 }
 
 // ---------- profiles ----------

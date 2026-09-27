@@ -80,9 +80,11 @@ export function ProviderLogo({ provider }: { provider: string }) {
   if (/opencode/i.test(provider)) return <OpenCodeMark />;
   const brand = /anthropic|claude/i.test(provider)
     ? "claude"
-    : /openai/i.test(provider)
+    : /openai|codex/i.test(provider)
       ? "openai"
-      : null;
+      : /gemini|google/i.test(provider)
+        ? "gemini"
+        : null;
   if (brand) {
     const { color, mark } = MODEL_MARKS[brand];
     return (

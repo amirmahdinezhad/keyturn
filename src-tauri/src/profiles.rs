@@ -1,10 +1,10 @@
 //! Profile index + app-wide settings.
 //!
-//! Each profile owns a store file with its providers, switch log and
-//! per-profile settings (theme, signed-in accounts, manual providers). The
-//! index file remembers which profiles exist, which one is active, and the
-//! app-wide preferences (tray, notifications, automation) that should not
-//! change when you switch profiles.
+//! Each profile owns a store file with its per-profile settings; the index
+//! file remembers which profiles exist, which one is active, and the
+//! app-wide preferences (refresh cadence, billing day, updates) that should
+//! not change when you switch profiles. Auth lives in the provider CLIs —
+//! nothing here stores keys, accounts, thresholds or automation.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,7 +13,7 @@ use std::path::Path;
 use crate::paths;
 use crate::store;
 
-pub const APP_SETTINGS_VERSION: u32 = 2;
+pub const APP_SETTINGS_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -22,48 +22,8 @@ pub struct ProfileRef {
     pub name: String,
 }
 
-fn default_true() -> bool {
-    true
-}
-
-fn default_thresholds() -> Vec<u32> {
-    vec![75, 90, 95]
-}
-
 fn default_refresh() -> u32 {
     60
-}
-
-fn default_reset_display() -> String {
-    "remaining".to_string()
-}
-
-fn default_usage_percent_mode() -> String {
-    "used".to_string()
-}
-
-fn default_time_format() -> String {
-    "system".to_string()
-}
-
-fn default_tray_style() -> String {
-    "battery".to_string()
-}
-
-fn default_color_mode() -> String {
-    "mono".to_string()
-}
-
-fn default_used_mode() -> String {
-    "percent".to_string()
-}
-
-fn default_metrics() -> Vec<String> {
-    vec!["rolling".to_string(), "weekly".to_string()]
-}
-
-fn default_tray_primary() -> String {
-    "auto".to_string()
 }
 
 fn default_billing_day() -> u32 {
@@ -73,45 +33,8 @@ fn default_billing_day() -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
-    /// How reset times are worded: `clock`, `remaining`, or `both`.
-    pub reset_display: String,
-    /// How quota percentages read in the panel: `used`, `remaining`, or `both`.
-    pub usage_percent_mode: String,
-    /// `system`, `12h`, or `24h`.
-    pub time_format: String,
     /// Panel refresh cadence in seconds (clamped to 10..=300).
     pub refresh_interval_secs: u32,
-    /// Switch to the least-used key automatically when one hits its limit.
-    pub auto_switch: bool,
-    pub notify_enabled: bool,
-    pub notify_thresholds: Vec<u32>,
-    /// Extra custom threshold on top of the presets, e.g. 80.
-    pub notify_custom: Option<u32>,
-    pub sound_enabled: bool,
-    /// File name inside `/System/Library/Sounds` (macOS) or an absolute path.
-    pub sound_name: Option<String>,
-    /// `battery`, `bar`, `percent`, `iconbar`, or `compact`.
-    pub tray_style: String,
-    /// `multi`, `mono`, or `custom`.
-    pub tray_color_mode: String,
-    /// `#rrggbb` used when `tray_color_mode` is `custom`.
-    pub tray_custom_color: String,
-    /// `percent` or `tokens`.
-    pub tray_used_mode: String,
-    /// Show `100 - used` instead of used.
-    pub tray_show_remaining: bool,
-    pub tray_show_labels: bool,
-    pub tray_show_pace: bool,
-    /// Quota windows shown in bar/icon styles.
-    pub tray_metrics: Vec<String>,
-    /// Which window drives the single-value styles: `auto` (first selected
-    /// metric), `rolling`, `weekly`, `monthly`, or `worst` (highest percent).
-    pub tray_primary: String,
-    /// Show several profiles side by side in the menu bar.
-    pub tray_multi: bool,
-    pub tray_profiles: Vec<String>,
-    /// Mark the active profile in multi-profile mode.
-    pub tray_active_indicator: bool,
     /// Day of month a billing cycle starts (used by the history chart).
     pub billing_day: u32,
     /// Sparkle-style update checks are opt-in. Kept here so the UI can say so.
@@ -121,28 +44,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
-            reset_display: default_reset_display(),
-            usage_percent_mode: default_usage_percent_mode(),
-            time_format: default_time_format(),
             refresh_interval_secs: default_refresh(),
-            auto_switch: false,
-            notify_enabled: false,
-            notify_thresholds: default_thresholds(),
-            notify_custom: None,
-            sound_enabled: true,
-            sound_name: None,
-            tray_style: default_tray_style(),
-            tray_color_mode: default_color_mode(),
-            tray_custom_color: "#0a84ff".to_string(),
-            tray_used_mode: default_used_mode(),
-            tray_show_remaining: false,
-            tray_show_labels: true,
-            tray_show_pace: true,
-            tray_metrics: default_metrics(),
-            tray_primary: default_tray_primary(),
-            tray_multi: false,
-            tray_profiles: Vec::new(),
-            tray_active_indicator: true,
             billing_day: default_billing_day(),
             auto_update_checks: false,
         }
@@ -150,57 +52,10 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
-    /// Keep every value inside the range the UI and the tray renderer expect.
+    /// Keep every value inside the range the UI expects.
     pub fn normalize(&mut self) {
         self.refresh_interval_secs = self.refresh_interval_secs.clamp(10, 300);
         self.billing_day = self.billing_day.clamp(1, 28);
-        self.notify_thresholds.retain(|t| (1..=100).contains(t));
-        self.notify_thresholds.sort_unstable();
-        self.notify_thresholds.dedup();
-        if self.notify_thresholds.is_empty() {
-            self.notify_thresholds = default_thresholds();
-        }
-        if let Some(custom) = self.notify_custom {
-            self.notify_custom = (custom <= 100).then_some(custom);
-        }
-        if !matches!(self.reset_display.as_str(), "clock" | "remaining" | "both") {
-            self.reset_display = default_reset_display();
-        }
-        if !matches!(self.time_format.as_str(), "system" | "12h" | "24h") {
-            self.time_format = default_time_format();
-        }
-        if !matches!(
-            self.usage_percent_mode.as_str(),
-            "used" | "remaining" | "both"
-        ) {
-            self.usage_percent_mode = default_usage_percent_mode();
-        }
-        if !matches!(
-            self.tray_style.as_str(),
-            "battery" | "bar" | "percent" | "iconbar" | "compact"
-        ) {
-            self.tray_style = default_tray_style();
-        }
-        if !matches!(self.tray_color_mode.as_str(), "multi" | "mono" | "custom") {
-            self.tray_color_mode = default_color_mode();
-        }
-        if !matches!(self.tray_used_mode.as_str(), "percent" | "tokens") {
-            self.tray_used_mode = default_used_mode();
-        }
-        self.tray_metrics
-            .retain(|m| matches!(m.as_str(), "rolling" | "weekly" | "monthly" | "api"));
-        if self.tray_metrics.is_empty() {
-            self.tray_metrics = default_metrics();
-        }
-        if !matches!(
-            self.tray_primary.as_str(),
-            "auto" | "rolling" | "weekly" | "monthly" | "worst"
-        ) {
-            self.tray_primary = default_tray_primary();
-        }
-        if !self.tray_custom_color.starts_with('#') || self.tray_custom_color.len() != 7 {
-            self.tray_custom_color = "#0a84ff".to_string();
-        }
     }
 }
 
@@ -440,15 +295,9 @@ mod tests {
         let mut app = AppSettings::default();
         app.refresh_interval_secs = 1;
         app.billing_day = 99;
-        app.notify_thresholds = vec![90, 75, 75, 500];
-        app.tray_style = "hologram".to_string();
-        app.tray_custom_color = "blue".to_string();
         app.normalize();
         assert_eq!(app.refresh_interval_secs, 10);
         assert_eq!(app.billing_day, 28);
-        assert_eq!(app.notify_thresholds, vec![75, 90]);
-        assert_eq!(app.tray_style, "battery");
-        assert_eq!(app.tray_custom_color, "#0a84ff");
     }
 
     #[test]
@@ -492,6 +341,5 @@ mod tests {
         let root = normalize_root(None, Some(true));
         assert_eq!(root.active, "default");
         assert_eq!(root.profiles.len(), 1);
-        assert_eq!(root.app.notify_thresholds, vec![75, 90, 95]);
     }
 }
