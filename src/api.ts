@@ -23,22 +23,6 @@ export function setAppSettings(
   return invoke<AppState>("set_app_settings", { settings });
 }
 
-export function profileCreate(name: string): Promise<AppState> {
-  return invoke<AppState>("profile_create", { name });
-}
-
-export function profileRename(id: string, name: string): Promise<AppState> {
-  return invoke<AppState>("profile_rename", { id, name });
-}
-
-export function profileSwitch(id: string): Promise<AppState> {
-  return invoke<AppState>("profile_switch", { id });
-}
-
-export function profileDelete(id: string): Promise<AppState> {
-  return invoke<AppState>("profile_delete", { id });
-}
-
 export function history(range: string): Promise<HistoryOut> {
   return invoke<HistoryOut>("history", { range });
 }

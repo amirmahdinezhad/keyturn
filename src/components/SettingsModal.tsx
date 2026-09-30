@@ -4,17 +4,12 @@ import {
   checkUpdates,
   exportHistory,
   prettyError,
-  profileCreate,
-  profileDelete,
-  profileRename,
-  profileSwitch,
   setAppSettings,
   setSettings,
 } from "../api";
 import type {
   AppSettings,
   AppState,
-  ProfileRef,
   UpdateOut,
 } from "../types";
 import { AppModal } from "./AppModal";
@@ -36,7 +31,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "advanced", label: "Advanced" },
 ];
 
-/** Settings: profiles, refresh cadence, billing day, history and updates. */
+/** Settings: refresh cadence, billing day, history and updates. */
 export function SettingsModal({
   open,
   onClose,
@@ -104,8 +99,6 @@ export function SettingsModal({
         <GeneralTab
           state={state}
           app={app}
-          onChanged={onChanged}
-          notify={notify}
           onToggleLogin={(v) => void toggleLogin(v)}
           onUpdate={(p) => void update(p)}
         />
@@ -215,147 +208,16 @@ function Toggle({
 function GeneralTab({
   state,
   app,
-  onChanged,
-  notify,
   onToggleLogin,
   onUpdate,
 }: {
   state: AppState;
   app: AppSettings;
-  onChanged: (s: AppState) => void;
-  notify: (m: string, k?: ToastKind) => void;
   onToggleLogin: (v: boolean) => void;
   onUpdate: (p: Partial<AppSettings>) => void;
 }) {
-  const [newName, setNewName] = useState("");
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-
-  const act = async (fn: () => Promise<AppState>) => {
-    try {
-      onChanged(await fn());
-    } catch (e) {
-      notify(prettyError(e), "err");
-    }
-  };
-
   return (
     <div className="settings-body">
-      <section className="settings-section">
-        <p className="section-label">Profiles</p>
-        <div className="profile-list">
-          {state.profiles.map((profile: ProfileRef) => (
-            <div
-              key={profile.id}
-              className={`profile-row${profile.id === state.activeProfile ? " on" : ""}`}
-            >
-              {renaming?.id === profile.id ? (
-                <Input
-                  className="ak-input"
-                  value={renaming.name}
-                  autoFocus
-                  onChange={(e) => setRenaming({ id: profile.id, name: e.target.value })}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      void act(async () => {
-                        const next = await profileRename(profile.id, renaming.name);
-                        setRenaming(null);
-                        return next;
-                      });
-                    }
-                    if (e.key === "Escape") setRenaming(null);
-                  }}
-                />
-              ) : (
-                <span className="profile-name">{profile.name}</span>
-              )}
-              {profile.id === state.activeProfile ? (
-                <span className="mini-chip on">Active</span>
-              ) : (
-                <Button
-                  size="sm"
-                  className="disc"
-                  onPress={() => void act(() => profileSwitch(profile.id))}
-                >
-                  Use
-                </Button>
-              )}
-              <button
-                type="button"
-                className="link-btn"
-                onClick={() =>
-                  setRenaming(
-                    renaming?.id === profile.id
-                      ? null
-                      : { id: profile.id, name: profile.name },
-                  )
-                }
-              >
-                Rename
-              </button>
-              {confirmDelete === profile.id ? (
-                <button
-                  type="button"
-                  className="link-btn danger"
-                  onClick={() =>
-                    void act(async () => {
-                      const next = await profileDelete(profile.id);
-                      setConfirmDelete(null);
-                      return next;
-                    })
-                  }
-                >
-                  Confirm delete
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="link-btn danger"
-                  disabled={state.profiles.length <= 1}
-                  onClick={() => setConfirmDelete(profile.id)}
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="profile-create">
-          <Input
-            className="ak-input"
-            placeholder="New profile name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && newName.trim()) {
-                void act(async () => {
-                  const next = await profileCreate(newName.trim());
-                  setNewName("");
-                  return next;
-                });
-              }
-            }}
-          />
-          <Button
-            size="sm"
-            className="primary"
-            isDisabled={!newName.trim()}
-            onPress={() =>
-              void act(async () => {
-                const next = await profileCreate(newName.trim());
-                setNewName("");
-                return next;
-              })
-            }
-          >
-            Add
-          </Button>
-        </div>
-        <p className="setting-note">
-          Every profile keeps its own history. App-wide display settings stay shared.
-        </p>
-      </section>
-
       <section className="settings-section">
         <p className="section-label">App</p>
         <Row name="Launch at login" desc="Open Keyturn when you sign in.">
@@ -364,11 +226,6 @@ function GeneralTab({
             selected={state.settings.openAtLogin}
             onChange={onToggleLogin}
           />
-        </Row>
-        <Row name="Theme" desc="More themes coming soon.">
-          <span className="theme-current">
-            {state.settings.theme === "light" ? "Light" : "Dark"}
-          </span>
         </Row>
         <Row name="Refresh interval" desc="Seconds between background refreshes (10–300).">
           <NumberInput

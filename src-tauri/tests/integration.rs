@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
 
 use keyturn_lib::cli::ProviderCliStatus;
-use keyturn_lib::profiles::{self, AppSettings, ProfileRef};
+use keyturn_lib::settings::AppSettings;
 use keyturn_lib::{paths, AppState, SettingsOut};
 use serde_json::json;
 
@@ -45,8 +45,7 @@ impl Drop for TempDir {
     }
 }
 
-/// `profiles::create` materialises the new profile's store inside the user data
-/// dir, so point that at a temp dir for the whole test binary.
+/// Point the user-data dir at a temp dir, so tests never touch real data.
 fn isolated_user_data() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
@@ -63,34 +62,25 @@ fn sample_state() -> AppState {
     AppState {
         settings: SettingsOut {
             open_at_login: true,
-            theme: "dark".into(),
         },
-        profiles: vec![ProfileRef {
-            id: "default".into(),
-            name: "Default".into(),
-        }],
-        active_profile: "default".into(),
         app: AppSettings::default(),
     }
 }
 
 #[test]
 fn app_state_serializes_to_the_frontend_contract() {
+    // No profiles, no theme, no keys: the state is settings + app prefs.
     let value = serde_json::to_value(sample_state()).expect("serialize");
     let obj = value.as_object().expect("AppState is an object");
 
     // Renaming a field here silently breaks src/types.ts, so pin the exact set.
-    // Auth fields (providers, applied, providerUsage, …) are gone by design:
-    // the CLIs own auth, Keyturn only shows their status via `cli_status`.
     let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
     keys.sort_unstable();
-    let mut expected = ["settings", "profiles", "activeProfile", "app"];
+    let mut expected = ["settings", "app"];
     expected.sort_unstable();
     assert_eq!(keys, expected, "AppState field names are the IPC contract");
 
-    assert_eq!(obj["settings"], json!({ "openAtLogin": true, "theme": "dark" }));
-    assert_eq!(obj["activeProfile"], json!("default"));
-    assert_eq!(obj["profiles"][0], json!({ "id": "default", "name": "Default" }));
+    assert_eq!(obj["settings"], json!({ "openAtLogin": true }));
 }
 
 #[test]
@@ -221,45 +211,25 @@ fn store_round_trips_settings_and_compacts_legacy_keys() {
     assert!(!keyturn_lib::store::compact_legacy(&file));
 }
 
-// ---------- profiles ----------
+// ---------- settings file ----------
 
 #[test]
-fn profiles_round_trip_through_the_public_api() {
-    let user_data = isolated_user_data();
+fn settings_round_trip_through_the_public_api() {
+    let _user_data = isolated_user_data();
     let dir = TempDir::new();
-    let index = dir.path("agent-rtl.profiles.json");
+    let file = dir.path("agent-rtl.settings.json");
 
-    let fresh = profiles::read_root(&index);
-    assert_eq!(fresh.profiles.len(), 1, "a fresh install has exactly one profile");
-    assert_eq!(fresh.active, paths::DEFAULT_PROFILE);
+    let fresh = keyturn_lib::settings::read_settings(&file);
+    assert_eq!(fresh.refresh_interval_secs, 60);
 
-    let (_root, work) = profiles::create(&index, "Work Laptop").expect("create profile");
-    assert_eq!(work.id, "work-laptop");
-    assert!(
-        user_data.join("agent-rtl.keys.work-laptop").exists(),
-        "creating a profile must materialise its store"
-    );
-
-    let switched = profiles::switch(&index, &work.id).expect("switch");
-    assert_eq!(switched.active, work.id);
-
-    let renamed = profiles::rename(&index, &work.id, "Studio").expect("rename");
+    let (saved, ()) = keyturn_lib::settings::update_settings(&file, |s| {
+        s.billing_day = 15;
+        Ok(())
+    })
+    .expect("update settings");
+    assert_eq!(saved.billing_day, 15);
     assert_eq!(
-        renamed.profiles.iter().find(|p| p.id == work.id).expect("profile").name,
-        "Studio"
+        keyturn_lib::settings::read_settings(&file).billing_day,
+        15
     );
-
-    let deleted = profiles::delete(&index, &work.id).expect("delete");
-    assert_eq!(deleted.active, paths::DEFAULT_PROFILE, "active falls back");
-    assert!(
-        !user_data.join("agent-rtl.keys.work-laptop").exists(),
-        "deleting a profile removes its store"
-    );
-
-    assert!(
-        profiles::delete(&index, paths::DEFAULT_PROFILE).is_err(),
-        "the last profile must be protected"
-    );
-
-    paths::set_active_profile(paths::DEFAULT_PROFILE);
 }

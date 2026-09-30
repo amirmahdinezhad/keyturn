@@ -23,8 +23,6 @@ OpenCode (`opencode auth login anthropic|openai|google`).
 ## Commands (via `invoke`)
 
 ```ts
-interface ProfileRef { id: string; name: string }
-
 interface AppSettings {
   refreshIntervalSecs: number            // 10..300
   billingDay: number                     // 1..28
@@ -32,9 +30,7 @@ interface AppSettings {
 }
 
 interface AppState {
-  settings: { openAtLogin: boolean; theme: string }
-  profiles: ProfileRef[]
-  activeProfile: string
+  settings: { openAtLogin: boolean }
   app: AppSettings
 }
 
@@ -59,33 +55,33 @@ interface ProviderCliStatus {
 
 - `get_state() -> AppState`
 - `cli_status() -> ProviderCliStatus[]` — runs the CLI status probes, read-only
-- `set_settings({ openAtLogin }) -> AppState` — launch at login (per profile store)
+- `set_settings({ openAtLogin }) -> AppState` — launch at login
 - `set_app_settings({ settings: Partial<AppSettings> }) -> AppState` — merges + normalizes
-- `profile_create({ name }) -> AppState`
-- `profile_rename({ id, name }) -> AppState`
-- `profile_switch({ id }) -> AppState`
-- `profile_delete({ id }) -> AppState`
 - `history({ range }) -> HistoryOut` — range: `5h|24h|7d|30d|billing`
 - `export_history({ range, format }) -> string` — format: `json|csv`, returns the written path
 - `check_updates() -> { available, version?, notes?, error? }`
 - `quit_app() -> ()`
 - All errors are returned as human-readable strings.
 
-Removed in v3 (auth lived here): `save_key`, `delete_key`, `apply_key`,
+Removed (auth lived here): `save_key`, `delete_key`, `apply_key`,
 `add_provider`, `remove_provider`, `account_status`, `connect_account_webview`,
 `disconnect_account`, `set_active_account_cmd`, `console_keys`, `console_usage`,
-`activate_account_key`, `codex_status`, `codex_refresh`, `console_payload`.
+`activate_account_key`, `codex_status`, `codex_refresh`, `console_payload`,
+`list_sounds`, `play_sound`.
+Removed (profiles/themes lived here): `profile_create`, `profile_rename`,
+`profile_switch`, `profile_delete`; the `theme` setting.
 Deleted modules: `account` (OAuth/keychain/console scraping), `bridge`
 (console hash-bridge), `auth` (auth.json patching), `providers` (console
-registry; replaced by the `cli` status registry).
+registry; replaced by the `cli` status registry), `profiles` (replaced by
+the single-file `settings` module).
 
 ## Semantics (backend owns)
 
-- **Profiles**: each profile has its own settings store file (`agent-rtl.keys.<id>`,
-  preferences only); the index (`agent-rtl.profiles.json`) holds the profile
-  list plus `AppSettings`. History is the local usage DB attribution, which
-  follows the active profile. Legacy v2 sections (stored keys, switch log,
-  accounts) are compacted out of the store file on launch.
+- **Settings**: one file (`agent-rtl.settings.json`) holds refresh cadence,
+  billing day and update checks; one store file (`agent-rtl.keys`) holds the
+  launch-at-login flag. History is the local usage DB aggregation. Legacy
+  sections (stored keys, switch log, accounts, themes, profiles) are
+  compacted out of the files on launch.
 - **CLI status** (`cli.rs`) never writes: binary lookup on `PATH` (+ Homebrew /
   `/usr/local/bin` fallbacks), one short-lived status subprocess per provider
   (10 s timeout), read-only peeks at the CLI auth files for display.
@@ -100,8 +96,8 @@ registry; replaced by the `cli` status registry).
 
 ## UI behaviors
 
-- Header: profile chip, gear (settings modal), refresh (re-reads state + CLI
-  status), quit icon; brand is the Keyturn logo (`AppLogo`) + `Keyturn`.
+- Header: refresh (re-reads state + CLI status), gear (settings modal),
+  quit icon; brand is the Keyturn logo (`AppLogo`) + `Keyturn`.
 - Main view: one `Providers` section with a card per CLI — logo, name, status
   pill (`Logged in` green / `Not logged in` amber / `Not installed` gray),
   version + binary path + account detail, connected chips for OpenCode
@@ -111,14 +107,14 @@ registry; replaced by the `cli` status registry).
   sub-provider hint (`opencode auth login anthropic|openai|google`).
 - Loading skeleton until first state; `EmptyState` on load/CLI-probe failure;
   toast bottom-center; radius 6 controls / 10 cards; accent #007aff.
-- Settings modal: tabs (General, Advanced) with profile management,
+- Settings modal: tabs (General, Advanced) with
   refresh cadence, billing day, history/export, updates.
 
 ## Frontend structure
 
 - `src/types.ts`, `src/api.ts` (invoke wrappers), `src/format.ts` (money, tokens,
   exact decimals, model marks, avatar hues), `src/logos.tsx`, `src/App.tsx` + `src/components/*`
-  (`CliProviders`, `SettingsModal`, `ProfileMenu`, `HistoryModal`, …).
+  (`CliProviders`, `SettingsModal`, `HistoryModal`, …).
 - `src/index.css`: `@import "@heroui/styles";` then the app tokens; new components append their own block
   at the end of the file.
 - `HeroUIProvider` at root. Prefer HeroUI Button/Modal/Input/Switch/Progress/Avatar/Chip/Skeleton with

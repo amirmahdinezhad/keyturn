@@ -8,16 +8,16 @@
 //!   2. shows whether the binary is installed and logged in,
 //!   3. shows the exact command / install page to copy.
 //!
-//! The remaining backend owns: profiles, app settings, launch-at-login,
+//! The remaining backend owns: app settings, launch-at-login,
 //! local history charts (read from the local usage DB), update checks,
-//! sounds, and the tray icon.
+//! and the tray icon.
 
 pub mod cli;
 pub mod codex;
 pub mod history;
 pub mod notify;
 pub mod paths;
-pub mod profiles;
+pub mod settings;
 pub mod store;
 pub mod tray;
 pub mod usage;
@@ -36,17 +36,13 @@ use tauri_plugin_positioner::{Position, WindowExt};
 #[serde(rename_all = "camelCase")]
 pub struct SettingsOut {
     pub open_at_login: bool,
-    pub theme: String,
 }
 
-/// Slim app state: no keys, no accounts, no quotas. Auth lives in the CLIs.
+/// Slim app state: no profiles, no theme, no keys, no quotas.
 #[derive(Debug, Clone, Serialize)]
 pub struct AppState {
     pub settings: SettingsOut,
-    pub profiles: Vec<profiles::ProfileRef>,
-    #[serde(rename = "activeProfile")]
-    pub active_profile: String,
-    pub app: profiles::AppSettings,
+    pub app: settings::AppSettings,
 }
 
 // ---------- helpers ----------
@@ -74,10 +70,10 @@ fn now_ms() -> i64 {
 }
 
 fn build_state(app: &AppHandle) -> AppState {
-    let root = profiles::read_root(&paths::profiles_file());
-    paths::set_active_profile(&root.active);
+    let settings_path = paths::settings_file();
+    let app_settings = settings::read_settings(&settings_path);
     let store_path = paths::store_file();
-    // One-time v2 cleanup: drop stored keys/logs/accounts from the file.
+    // One-time legacy cleanup: drop stored keys/logs/accounts/theme.
     store::compact_legacy(&store_path);
     let actual = autolaunch_enabled(app);
     let store = {
@@ -95,11 +91,8 @@ fn build_state(app: &AppHandle) -> AppState {
     AppState {
         settings: SettingsOut {
             open_at_login: store.settings.open_at_login,
-            theme: store.settings.theme.clone(),
         },
-        profiles: root.profiles.clone(),
-        active_profile: root.active.clone(),
-        app: root.app.clone(),
+        app: app_settings,
     }
 }
 
@@ -124,8 +117,7 @@ fn spawn_background_refresh(app: AppHandle) {
     std::thread::spawn(move || {
         let mut last_update_check = Instant::now();
         loop {
-            let interval_secs = profiles::read_root(&paths::profiles_file())
-                .app
+            let interval_secs = settings::read_settings(&paths::settings_file())
                 .refresh_interval_secs
                 .clamp(10, 300) as u64;
             std::thread::sleep(Duration::from_secs(interval_secs));
@@ -135,9 +127,7 @@ fn spawn_background_refresh(app: AppHandle) {
             }
             if last_update_check.elapsed() > Duration::from_secs(24 * 3600) {
                 last_update_check = Instant::now();
-                let wanted = profiles::read_root(&paths::profiles_file())
-                    .app
-                    .auto_update_checks;
+                let wanted = settings::read_settings(&paths::settings_file()).auto_update_checks;
                 if wanted {
                     tauri::async_runtime::block_on(auto_update_check(&app));
                 }
@@ -168,15 +158,15 @@ async fn set_settings(app: AppHandle, openAtLogin: bool) -> Result<AppState, Str
 /// Merge a partial app-settings object (refresh cadence, billing, updates).
 #[tauri::command]
 async fn set_app_settings(app: AppHandle, settings: serde_json::Value) -> Result<AppState, String> {
-    let path = paths::profiles_file();
-    profiles::update_root(&path, |root| {
-        let mut merged = serde_json::to_value(&root.app).map_err(|e| e.to_string())?;
+    let path = paths::settings_file();
+    settings::update_settings(&path, |current| {
+        let mut merged = serde_json::to_value(&current).map_err(|e| e.to_string())?;
         if let (Some(dst), Some(src)) = (merged.as_object_mut(), settings.as_object()) {
             for (key, value) in src {
                 dst.insert(key.clone(), value.clone());
             }
         }
-        root.app = serde_json::from_value(merged).map_err(|e| format!("Invalid settings: {e}"))?;
+        *current = serde_json::from_value(merged).map_err(|e| format!("Invalid settings: {e}"))?;
         Ok(())
     })?;
     Ok(build_state(&app))
@@ -192,40 +182,13 @@ async fn cli_status() -> Vec<cli::ProviderCliStatus> {
         .unwrap_or_default()
 }
 
-// ---------- profiles ----------
-
-#[tauri::command]
-async fn profile_create(app: AppHandle, name: String) -> Result<AppState, String> {
-    profiles::create(&paths::profiles_file(), &name)?;
-    Ok(build_state(&app))
-}
-
-#[tauri::command]
-async fn profile_rename(app: AppHandle, id: String, name: String) -> Result<AppState, String> {
-    profiles::rename(&paths::profiles_file(), &id, &name)?;
-    Ok(build_state(&app))
-}
-
-#[tauri::command]
-async fn profile_switch(app: AppHandle, id: String) -> Result<AppState, String> {
-    profiles::switch(&paths::profiles_file(), &id)?;
-    Ok(build_state(&app))
-}
-
-#[tauri::command]
-async fn profile_delete(app: AppHandle, id: String) -> Result<AppState, String> {
-    let root = profiles::delete(&paths::profiles_file(), &id)?;
-    paths::set_active_profile(&root.active);
-    Ok(build_state(&app))
-}
-
 // ---------- history, updates ----------
 
 #[tauri::command]
 async fn history(range: String) -> Result<history::HistoryOut, String> {
-    let root = profiles::read_root(&paths::profiles_file());
+    let billing_day = settings::read_settings(&paths::settings_file()).billing_day;
     let (entries, error) = history::read_entries();
-    let mut out = history::build(&entries, &range, root.app.billing_day, now_ms());
+    let mut out = history::build(&entries, &range, billing_day, now_ms());
     out.error = error;
     Ok(out)
 }
@@ -280,9 +243,9 @@ async fn check_updates(app: AppHandle) -> Result<UpdateOut, String> {
 
 #[tauri::command]
 async fn export_history(range: String, format: String) -> Result<String, String> {
-    let root = profiles::read_root(&paths::profiles_file());
+    let billing_day = settings::read_settings(&paths::settings_file()).billing_day;
     let (entries, _) = history::read_entries();
-    let out = history::build(&entries, &range, root.app.billing_day, now_ms());
+    let out = history::build(&entries, &range, billing_day, now_ms());
     let path = history::export(&out, &format)?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -399,10 +362,6 @@ pub fn run() {
             get_state,
             set_settings,
             set_app_settings,
-            profile_create,
-            profile_rename,
-            profile_switch,
-            profile_delete,
             history,
             export_history,
             check_updates,
@@ -414,8 +373,6 @@ pub fn run() {
             app.set_activation_policy(ActivationPolicy::Accessory);
 
             // Direct toggle on click — no menu, so nothing intercepts the click.
-            let root = profiles::read_root(&paths::profiles_file());
-            paths::set_active_profile(&root.active);
             let mut builder = TrayIconBuilder::with_id("main").tooltip("Keyturn");
             builder = builder.icon(tray::render());
             #[cfg(target_os = "macos")]

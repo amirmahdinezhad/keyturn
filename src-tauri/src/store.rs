@@ -1,9 +1,9 @@
-//! Per-profile store file.
+//! Per-machine store file.
 //!
-//! CLI-only model: the store holds nothing but local preferences
-//! (`openAtLogin`, theme). Keys, switch logs and signed-in accounts lived
-//! here in v2; auth now belongs to the provider CLIs, so those sections are
-//! gone. Legacy files are compacted on launch (see `compact_legacy`).
+//! CLI-only model: the store holds nothing but the launch-at-login flag.
+//! Keys, switch logs, signed-in accounts and themes lived here in v2/v3;
+//! auth now belongs to the provider CLIs, so those sections are gone.
+//! Legacy files are compacted on launch (see `compact_legacy`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,24 +11,17 @@ use std::path::Path;
 
 use crate::paths;
 
-fn default_theme() -> String {
-    "dark".to_string()
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     #[serde(default)]
     pub open_at_login: bool,
-    #[serde(default = "default_theme")]
-    pub theme: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             open_at_login: false,
-            theme: default_theme(),
         }
     }
 }
@@ -54,10 +47,6 @@ pub fn normalize(raw: Option<Value>) -> Store {
             .get("openAtLogin")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        store.settings.theme = match s.get("theme").and_then(|v| v.as_str()) {
-            Some("light") => "light".to_string(),
-            _ => "dark".to_string(),
-        };
     }
     store
 }
@@ -76,6 +65,7 @@ pub fn compact_legacy(path: &Path) -> bool {
                         s.contains_key("accounts")
                             || s.contains_key("active_account")
                             || s.contains_key("custom_providers")
+                            || s.contains_key("theme")
                     })
         }
         _ => false,
@@ -129,20 +119,19 @@ mod tests {
 
     #[test]
     fn normalizes_malformed_and_defaults_settings() {
-        // v2 sections are ignored: keys, logs and accounts do not come back.
+        // v2/v3 sections are ignored: keys, logs, accounts and theme do not come back.
         let raw: Value = serde_json::json!({
             "providers": { "p": { "keys": { "good": { "key": "k", "type": "api" } } } },
             "log": [{ "t": 1, "provider": "p", "key": "good", "action": "switch" }],
-            "settings": { "accounts": [], "custom_providers": ["x"] },
+            "settings": { "accounts": [], "custom_providers": ["x"], "theme": "light" },
         });
         let value = serde_json::to_value(normalize(Some(raw))).expect("serialize");
-        assert_eq!(value, serde_json::json!({ "settings": { "openAtLogin": false, "theme": "dark" } }));
+        assert_eq!(value, serde_json::json!({ "settings": { "openAtLogin": false } }));
 
         let lit = normalize(Some(
-            serde_json::json!({ "settings": { "openAtLogin": true, "theme": "light" } }),
+            serde_json::json!({ "settings": { "openAtLogin": true } }),
         ));
         assert!(lit.settings.open_at_login);
-        assert_eq!(lit.settings.theme, "light");
     }
 
     #[test]

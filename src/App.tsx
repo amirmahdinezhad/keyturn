@@ -5,7 +5,6 @@ import {
   cliStatus,
   getState,
   prettyError,
-  profileSwitch,
   quitApp,
   type ProviderCliStatus,
 } from "./api";
@@ -13,7 +12,6 @@ import { AppLogo } from "./logos";
 import { LogoutIcon, RefreshIcon, SettingIcon } from "./icons";
 import { CliProviders } from "./components/CliProviders";
 import { SettingsModal } from "./components/SettingsModal";
-import { ProfileMenu } from "./components/ProfileMenu";
 import { HistoryModal } from "./components/HistoryModal";
 import { EmptyState } from "./components/EmptyState";
 import { Toast, type ToastData, type ToastKind } from "./components/Toast";
@@ -26,7 +24,6 @@ export default function App() {
   const [cliError, setCliError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [profileBusy, setProfileBusy] = useState(false);
   const [toast, setToast] = useState<ToastData | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const toastTimer = useRef(0);
@@ -87,18 +84,6 @@ export default function App() {
     };
   }, [load, refreshIntervalSecs]);
 
-  const handleProfileSwitch = async (id: string) => {
-    setProfileBusy(true);
-    try {
-      applyState(await profileSwitch(id));
-      notify("Profile switched", "ok");
-    } catch (e) {
-      notify(prettyError(e), "err");
-    } finally {
-      setProfileBusy(false);
-    }
-  };
-
   return (
     <>
       <header className="app-header">
@@ -107,15 +92,6 @@ export default function App() {
           <span>Keyturn</span>
         </div>
         <div className="header-actions">
-          {state ? (
-            <ProfileMenu
-              profiles={state.profiles}
-              active={state.activeProfile}
-              busy={profileBusy}
-              onSwitch={(id) => void handleProfileSwitch(id)}
-              onManage={() => setSettingsOpen(true)}
-            />
-          ) : null}
           <Button
             isIconOnly
             size="sm"

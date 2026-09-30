@@ -1,7 +1,8 @@
 // IPC contract types — mirrors CONTRACT.md. Keep in sync with src-tauri.
 //
 // CLI-only contract: auth lives in the provider CLIs, quotas are gone with
-// stored keys. Settings carry refresh cadence, billing day and update checks.
+// stored keys. No profiles, no themes: settings carry refresh cadence,
+// billing day and update checks.
 
 export interface AppSettings {
   refreshIntervalSecs: number;
@@ -9,15 +10,8 @@ export interface AppSettings {
   autoUpdateChecks: boolean;
 }
 
-export interface ProfileRef {
-  id: string;
-  name: string;
-}
-
 export interface AppState {
-  settings: { openAtLogin: boolean; theme: string };
-  profiles: ProfileRef[];
-  activeProfile: string;
+  settings: { openAtLogin: boolean };
   app: AppSettings;
 }
 

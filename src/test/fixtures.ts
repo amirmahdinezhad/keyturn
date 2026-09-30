@@ -8,9 +8,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 export function makeState(over: Partial<AppState> = {}): AppState {
   return {
-    settings: { openAtLogin: false, theme: "dark" },
-    profiles: [{ id: "default", name: "Default" }],
-    activeProfile: "default",
+    settings: { openAtLogin: false },
     app: DEFAULT_APP_SETTINGS,
     ...over,
   };

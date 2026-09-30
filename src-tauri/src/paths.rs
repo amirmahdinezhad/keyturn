@@ -21,46 +21,14 @@ pub fn opencode_user_data() -> PathBuf {
     return home_dir().join(".config/ai.opencode.desktop");
 }
 
-pub const DEFAULT_PROFILE: &str = "default";
-
-static ACTIVE_PROFILE: std::sync::LazyLock<std::sync::Mutex<String>> =
-    std::sync::LazyLock::new(|| std::sync::Mutex::new(DEFAULT_PROFILE.to_string()));
-
-/// Which profile the store helpers should read/write. Set once at startup from
-/// the profiles index and again on every switch.
-pub fn set_active_profile(id: &str) {
-    if let Ok(mut current) = ACTIVE_PROFILE.lock() {
-        *current = id.to_string();
-    }
-}
-
-pub fn active_profile() -> String {
-    ACTIVE_PROFILE
-        .lock()
-        .map(|id| id.clone())
-        .unwrap_or_else(|_| DEFAULT_PROFILE.to_string())
-}
-
-/// The default profile keeps the Electron-compatible `agent-rtl.keys` name so
-/// `agent-keyring` can keep reading it; extra profiles get their own files.
+/// Single per-machine store file (launch-at-login flag only now).
 pub fn store_file() -> PathBuf {
-    let id = active_profile();
-    if id == DEFAULT_PROFILE {
-        return opencode_user_data().join("agent-rtl.keys");
-    }
-    opencode_user_data().join(format!("agent-rtl.keys.{id}"))
+    opencode_user_data().join("agent-rtl.keys")
 }
 
-pub fn store_file_for(profile: &str) -> PathBuf {
-    if profile == DEFAULT_PROFILE {
-        return opencode_user_data().join("agent-rtl.keys");
-    }
-    opencode_user_data().join(format!("agent-rtl.keys.{profile}"))
-}
-
-/// Profile index + app-wide settings (tray, notifications, automation).
-pub fn profiles_file() -> PathBuf {
-    opencode_user_data().join("agent-rtl.profiles.json")
+/// App-wide settings (refresh cadence, billing day, update checks).
+pub fn settings_file() -> PathBuf {
+    opencode_user_data().join("agent-rtl.settings.json")
 }
 
 pub fn codex_home() -> PathBuf {
