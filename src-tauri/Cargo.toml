@@ -18,7 +18,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+# `custom-protocol` is enabled by the Tauri CLI on every build (asset
+# protocol); declaring it here keeps plain `cargo build` and `tauri build`
+# on identical feature sets so they share one artifact cache.
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png", "custom-protocol"] }
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
@@ -42,4 +45,8 @@ codegen-units = 1
 lto = true
 opt-level = 3
 panic = "abort"
-strip = true
+# `strip = true` ("symbols") mis-aligns LINKEDIT with the Xcode 16 linker,
+# producing dylibs dyld refuses to load (proc macros then fail with E0463).
+# "debuginfo" still passes `-S`, which corrupts some inputs too
+# (tauri-macros + custom-protocol). No stripping until the linker is fixed.
+strip = false
