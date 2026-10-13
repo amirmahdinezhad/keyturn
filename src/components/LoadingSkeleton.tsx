@@ -1,10 +1,11 @@
-import { Skeleton, Spinner } from "@heroui/react";
+import { Skeleton } from "./ui/skeleton";
+import { SpinnerIcon } from "../icons";
 
 /** Shown until the first backend state arrives. */
 export function LoadingSkeleton() {
   return (
     <div className="loading" role="status" aria-label="Loading">
-      <Spinner size="lg" className="loading-spinner" aria-label="Loading keys" />
+      <SpinnerIcon size={44} className="loading-spinner ak-spin" />
       <Skeleton className="skel" />
       <Skeleton className="skel" />
       <Skeleton className="skel" />

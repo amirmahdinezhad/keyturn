@@ -1,56 +1,64 @@
 # Adding a provider
 
-Keyturn is CLI-only (T3-style): it never authenticates. Adding a provider is
-a data change in `src-tauri/src/cli.rs` plus a logo tweak — no sign-in flow,
-no credential patching, no console scraping.
+Keyturn reads CLI status and usage sources. Authentication remains in the
+provider's CLI; the app displays instructions and never runs login commands
+or patches credential files.
 
-## 1. Describe the CLI
+## Backend status
 
-Append a `CliSpec` to `SPECS` in `src-tauri/src/cli.rs`:
+Add a `CliSpec` to `SPECS` in `src-tauri/src/cli.rs`:
 
 ```rust
 CliSpec {
     id: "acme",
     label: "Acme AI",
     binary: "acme",
-    install_url: "https://acme.ai/cli",
+    install_url: "https://acme.example/cli",
     login_cmd: "acme login",
 }
 ```
 
-Then add a `probe_*` function that answers "is this CLI logged in?" using
-ONLY read-only means:
+Implement a read-only probe and wire it into `status_for`. Prefer a CLI status
+subcommand through `run_status` with a bounded timeout; otherwise inspect its
+credential file/environment without writing. Binary lookup includes `PATH`,
+Homebrew, `/usr/local/bin`, system directories and `~/.local/bin`.
 
-- preferred: the CLI's own status subcommand
-  (e.g. `claude auth status --json`, `codex login status`, `opencode auth list`),
-  run via the `run_status` helper (10 s timeout, never a login/write command);
-- fallback: a read-only peek at the CLI's credential file or env vars
-  (see `probe_gemini`: `~/.gemini/oauth_creds.json`, `GEMINI_API_KEY`, …).
+Return the existing `ProviderCliStatus` shape. Unknown login state is `None`;
+optional `None` values and empty `connected` arrays are omitted during
+serialization. `connected` contains service IDs for a CLI such as OpenCode.
+Do not put raw credentials in any IPC field.
 
-Wire it into `status_for` and return the `(logged_in, auth_method, email,
-account, detail, connected, auth_file)` tuple. `connected` is for meta-CLIs
-like OpenCode that host sub-providers; leave it empty otherwise.
+## Setup and cards
 
-Field notes:
+- Add instructions, copyable installation command, verification command when
+  available, and official guide links to `PROVIDER_SETUP` in
+  `src/providerSetup.ts`. Add readable service names to `PROVIDER_NAMES` if needed.
+- Add the provider mark to `ProviderLogo` in `src/logos.tsx`; otherwise it uses
+  its existing fallback.
+- `CliProviders.tsx` displays a provider only when `binaryFound` and
+  `loggedIn === true`. The Add account wizard receives the other statuses.
+- Wizard selection advances directly to Install or Sign in. Installation and
+  sign-in checks use fresh status; success requires both the binary and
+  a confirmed login.
 
-| Field | Meaning |
-| --- | --- |
-| `binary` | Default executable looked up on `PATH` (+ Homebrew/`/usr/local/bin` fallbacks). |
-| `login_cmd` | Exact command shown to the user to copy into their own terminal. Never executed by the app. |
-| `install_url` | Shown (copyable) when the binary is missing. |
-| `detail` | One-line human subtitle, e.g. `Logged in using ChatGPT`. |
-| `auth_file` | Credential file peeked at read-only for display, if any. |
+## Optional quota source
 
-## 2. Frontend
+Add a read-only source returning `quota::QuotaSet`, and include it in
+`cli_quotas` in `src-tauri/src/lib.rs`. `percent` represents used capacity;
+`as_of` is the observation timestamp for a local snapshot. Missing data and
+source failures must remain distinguishable.
 
-- Nothing required: `CliProviders.tsx` renders whatever `cli_status` returns.
-- Add a brand mark to `src/logos.tsx` (`ProviderLogo`) if the fallback letter
-  avatar is not good enough.
+Register the card's usage button in `QUOTA_IDS` in `CliProviders.tsx`, and add
+its source mapping and empty message in `UsageModal.tsx`. Opening any usage
+popup currently reads every backend quota source, then filters by provider
+in the frontend. It does not start a background quota refresh loop.
 
-## 3. Tests
+## Verification
 
-- `cargo test cli::` covers parsing (Claude JSON, Codex status text,
-  `opencode auth list` tokens, Gemini env fallback).
-- `cargo test --test integration cli_` covers the spec list and the
-  `ProviderCliStatus` IPC field names (they must match `src/api.ts`).
-- `npm test -- --run` covers the card rendering in `src/App.test.tsx`.
+- Add parser tests beside the Rust probe/source. Update registry and IPC
+  expectations in `src-tauri/tests/integration.rs` when the provider set changes.
+- Cover card rendering, setup validation and usage behavior in the relevant
+  frontend tests; update fixtures as needed.
+- Run typecheck, Vitest, Rust checks/tests and native panel/HMR checks from
+  [Testing](TESTING.md).
+- Update the provider/source tables in `README.md` and `CONTRACT.md`.

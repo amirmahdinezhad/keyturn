@@ -8,22 +8,19 @@
 //!   2. shows whether the binary is installed and logged in,
 //!   3. shows the exact command / install page to copy.
 //!
-//! The remaining backend owns: app settings, launch-at-login,
-//! local history charts (read from the local usage DB), update checks,
-//! and the tray icon.
+//! The backend owns app settings, launch-at-login, read-only quota sources
+//! and the tray panel. The frontend uses the updater plugin directly.
 
 pub mod cli;
+pub mod claude_usage;
 pub mod codex;
-pub mod history;
-pub mod notify;
 pub mod paths;
+pub mod quota;
 pub mod settings;
 pub mod store;
 pub mod tray;
-pub mod usage;
 
 use serde::Serialize;
-use std::time::{Duration, Instant};
 use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     ActivationPolicy, AppHandle, Manager, WindowEvent,
@@ -62,13 +59,6 @@ fn apply_open_at_login(app: &AppHandle, open_at_login: bool) {
     };
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
 fn build_state(app: &AppHandle) -> AppState {
     let settings_path = paths::settings_file();
     let app_settings = settings::read_settings(&settings_path);
@@ -96,47 +86,6 @@ fn build_state(app: &AppHandle) -> AppState {
     }
 }
 
-/// Background loop: checks for updates every 24 h when enabled.
-/// (Wake detection lives in the frontend panel, which refreshes on focus.)
-async fn auto_update_check(app: &AppHandle) {
-    use tauri_plugin_updater::UpdaterExt;
-    let Ok(updater) = app.updater() else {
-        return;
-    };
-    if let Ok(Some(update)) = updater.check().await {
-        notify::send(
-            app,
-            "Update available",
-            &format!("Version {} is ready to install.", update.version),
-        );
-    }
-}
-
-fn spawn_background_refresh(app: AppHandle) {
-    static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    std::thread::spawn(move || {
-        let mut last_update_check = Instant::now();
-        loop {
-            let interval_secs = settings::read_settings(&paths::settings_file())
-                .refresh_interval_secs
-                .clamp(10, 300) as u64;
-            std::thread::sleep(Duration::from_secs(interval_secs));
-
-            if BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                continue;
-            }
-            if last_update_check.elapsed() > Duration::from_secs(24 * 3600) {
-                last_update_check = Instant::now();
-                let wanted = settings::read_settings(&paths::settings_file()).auto_update_checks;
-                if wanted {
-                    tauri::async_runtime::block_on(auto_update_check(&app));
-                }
-            }
-            BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
-        }
-    });
-}
-
 // ---------- commands ----------
 
 #[tauri::command]
@@ -155,7 +104,7 @@ async fn set_settings(app: AppHandle, openAtLogin: bool) -> Result<AppState, Str
     Ok(build_state(&app))
 }
 
-/// Merge a partial app-settings object (refresh cadence, billing, updates).
+/// Merge partial app preferences (refresh cadence and quota wording).
 #[tauri::command]
 async fn set_app_settings(app: AppHandle, settings: serde_json::Value) -> Result<AppState, String> {
     let path = paths::settings_file();
@@ -182,72 +131,23 @@ async fn cli_status() -> Vec<cli::ProviderCliStatus> {
         .unwrap_or_default()
 }
 
-// ---------- history, updates ----------
-
+/// Read all supported quota sources: OpenCode, Claude transcripts and Codex.
+/// Credential files are read only; the frontend filters by provider.
 #[tauri::command]
-async fn history(range: String) -> Result<history::HistoryOut, String> {
-    let billing_day = settings::read_settings(&paths::settings_file()).billing_day;
-    let (entries, error) = history::read_entries();
-    let mut out = history::build(&entries, &range, billing_day, now_ms());
-    out.error = error;
-    Ok(out)
-}
-
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateOut {
-    available: bool,
-    version: Option<String>,
-    notes: Option<String>,
-    error: Option<String>,
-}
-
-/// Manual update check. The updater plugin is configured in tauri.conf.json;
-/// when no signing key is set yet this returns a readable error instead of
-/// failing the call.
-#[tauri::command]
-async fn check_updates(app: AppHandle) -> Result<UpdateOut, String> {
-    use tauri_plugin_updater::UpdaterExt;
-    let updater = match app.updater() {
-        Ok(updater) => updater,
-        Err(e) => {
-            return Ok(UpdateOut {
-                available: false,
-                version: None,
-                notes: None,
-                error: Some(e.to_string()),
-            })
+async fn cli_quotas() -> Vec<quota::QuotaSet> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut out = quota::opencode_quotas();
+        if let Some(claude) = claude_usage::claude_quota_set() {
+            out.push(claude);
         }
-    };
-    match updater.check().await {
-        Ok(Some(update)) => Ok(UpdateOut {
-            available: true,
-            version: Some(update.version.clone()),
-            notes: update.body.clone(),
-            error: None,
-        }),
-        Ok(None) => Ok(UpdateOut {
-            available: false,
-            version: None,
-            notes: None,
-            error: None,
-        }),
-        Err(e) => Ok(UpdateOut {
-            available: false,
-            version: None,
-            notes: None,
-            error: Some(e.to_string()),
-        }),
-    }
-}
-
-#[tauri::command]
-async fn export_history(range: String, format: String) -> Result<String, String> {
-    let billing_day = settings::read_settings(&paths::settings_file()).billing_day;
-    let (entries, _) = history::read_entries();
-    let out = history::build(&entries, &range, billing_day, now_ms());
-    let path = history::export(&out, &format)?;
-    Ok(path.to_string_lossy().into_owned())
+        if let Some(codex) = quota::codex_quota_set() {
+            out.push(codex);
+        }
+        out.sort_by(|a, b| a.provider.cmp(&b.provider));
+        out
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -294,6 +194,8 @@ fn show_panel(app: &AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    // Keep the mounted webview and its current screen on every tray click.
+    // Vite HMR handles source changes; data refresh is manual or scheduled.
     // Show first so the window has a backing store, then anchor it.
     let _ = window.show();
     position_panel(app, &window);
@@ -356,16 +258,15 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_positioner::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_state,
             set_settings,
             set_app_settings,
-            history,
-            export_history,
-            check_updates,
             cli_status,
+            cli_quotas,
             quit_app
         ])
         .setup(|app| {
@@ -380,7 +281,6 @@ pub fn run() {
                 builder = builder.icon_as_template(true);
             }
             let app_handle = app.handle().clone();
-            spawn_background_refresh(app.handle().clone());
             builder
                 .on_tray_icon_event(move |_tray, event| {
                     if let TrayIconEvent::Click {

@@ -13,28 +13,27 @@ import {
   Refresh,
   Setting2,
   TickCircle,
-  Speedometer,
   Trash,
   type Icon as IconsaxIcon,
 } from "iconsax-react";
 
 /**
- * App icon set — iconsax, Bold style only.
- * Bold is the filled tier: solid shapes that stay legible at 16–20px in the
- * menubar panel. Linear (1.5px outline) reads thin and washed-out at these
- * sizes, so it is never used here. `color` is always currentColor so icons
- * inherit text color.
+ * App icon set — iconsax Linear, with a locally drawn usage gauge.
+ * Linear is the 1.5px outline tier: light, minimal lines that match the
+ * quiet menubar-panel aesthetic. `color` is always currentColor so icons
+ * inherit text color. Default size is 20 (up from 18) because outlines
+ * read smaller than fills at the same box.
  */
 interface IconProps {
   size?: number | string;
   className?: string;
 }
 
-function bold(Icon: IconsaxIcon) {
-  return function BoldIcon({ size = 18, className }: IconProps) {
+function linear(Icon: IconsaxIcon) {
+  return function LinearIcon({ size = 20, className }: IconProps) {
     return (
       <Icon
-        variant="Bold"
+        variant="Linear"
         size={size}
         color="currentColor"
         className={`ak-icon${className ? ` ${className}` : ""}`}
@@ -72,20 +71,42 @@ export function SpinnerIcon({ size = 16, className }: IconProps) {
   );
 }
 
-export const SettingIcon = bold(Setting2);
-export const PrevIcon = bold(ArrowLeft2);
-export const NextIcon = bold(ArrowRight2);
-export const TrashIcon = bold(Trash);
-export const InfoCircleIcon = bold(InfoCircle);
-export const UsageIcon = bold(Speedometer);
-export const ChartIcon = bold(Chart1);
-export const LogoutIcon = bold(Logout);
-export const CloseIcon = bold(CloseCircle);
-export const AddIcon = bold(Add);
-export const SaveIcon = bold(TickCircle);
-export const CopyIcon = bold(Copy);
-export const EyeIcon = bold(Eye);
-export const EyeOffIcon = bold(EyeSlash);
-export const KeyIcon = bold(Key);
-export const TickIcon = bold(TickCircle);
-export const RefreshIcon = bold(Refresh);
+export const SettingIcon = linear(Setting2);
+export const PrevIcon = linear(ArrowLeft2);
+export const NextIcon = linear(ArrowRight2);
+export const TrashIcon = linear(Trash);
+export const InfoCircleIcon = linear(InfoCircle);
+
+/** Locally drawn quota gauge, matching the app's 1.5px Linear outlines. */
+export function UsageIcon({ size = 20, className }: IconProps) {
+  return (
+    <svg
+      className={`ak-icon${className ? ` ${className}` : ""}`}
+      data-icon="usage-gauge"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5.6 19a9 9 0 1 1 12.8 0H5.6Z" />
+      <path d="M5 12h2m10 0h2M12 5v2M7 7l1.4 1.4M16 8l-3 4" />
+      <circle cx="12" cy="13" r="1.5" />
+    </svg>
+  );
+}
+export const ChartIcon = linear(Chart1);
+export const LogoutIcon = linear(Logout);
+export const CloseIcon = linear(CloseCircle);
+export const AddIcon = linear(Add);
+export const SaveIcon = linear(TickCircle);
+export const CopyIcon = linear(Copy);
+export const EyeIcon = linear(Eye);
+export const EyeOffIcon = linear(EyeSlash);
+export const KeyIcon = linear(Key);
+export const TickIcon = linear(TickCircle);
+export const RefreshIcon = linear(Refresh);

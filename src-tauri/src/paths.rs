@@ -26,7 +26,7 @@ pub fn store_file() -> PathBuf {
     opencode_user_data().join("agent-rtl.keys")
 }
 
-/// App-wide settings (refresh cadence, billing day, update checks).
+/// App-wide settings (refresh cadence and quota wording).
 pub fn settings_file() -> PathBuf {
     opencode_user_data().join("agent-rtl.settings.json")
 }
@@ -44,8 +44,14 @@ pub fn codex_auth_file() -> PathBuf {
     codex_home().join("auth.json")
 }
 
-pub fn downloads_dir() -> PathBuf {
-    dirs::download_dir().unwrap_or_else(home_dir)
+/// Claude Code home, honoring the CLI's own override like the CLI does.
+pub fn claude_home() -> PathBuf {
+    if let Ok(dir) = env::var("CLAUDE_CONFIG_DIR") {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    home_dir().join(".claude")
 }
 
 pub fn open_code_auth_file() -> PathBuf {
@@ -58,13 +64,6 @@ pub fn open_code_auth_file() -> PathBuf {
     return home_dir().join(".opencode/auth.json");
     #[cfg(not(target_os = "windows"))]
     return home_dir().join(".local/share/opencode/auth.json");
-}
-
-pub fn open_code_db_file() -> PathBuf {
-    open_code_auth_file()
-        .parent()
-        .map(|p| p.join("opencode.db"))
-        .unwrap_or_else(open_code_auth_file)
 }
 
 pub fn atomic_write_json(file: &Path, data: &Value) {

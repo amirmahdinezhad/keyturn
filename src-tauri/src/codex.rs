@@ -64,8 +64,7 @@ fn id_token_info(raw: &str) -> (Option<String>, Option<String>, Option<String>) 
 }
 
 /// Read-only peek at the CLI's auth file. Never writes.
-pub fn status() -> CodexStatus {
-    let file = paths::codex_auth_file();
+pub fn status() -> CodexStatus {    let file = paths::codex_auth_file();
     let Some(Value::Object(root)) = paths::read_json(&file) else {
         return CodexStatus::default();
     };
@@ -104,6 +103,27 @@ pub fn status() -> CodexStatus {
             .and_then(|v| v.as_str())
             .map(str::to_string),
     }
+}
+
+/// OAuth access token, account id and `exp` for read-only quota lookups.
+/// Returns `None` when nothing usable is stored. Never writes.
+pub fn oauth_access() -> Option<(String, Option<String>, Option<i64>)> {
+    let file = paths::codex_auth_file();
+    let Some(serde_json::Value::Object(root)) = paths::read_json(&file) else {
+        return None;
+    };
+    let tokens = root.get("tokens")?;
+    let access = tokens
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let account_id = tokens
+        .get("account_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    let expires_at = jwt_payload(&access).and_then(|c| c.get("exp").and_then(|v| v.as_i64()));
+    Some((access, account_id, expires_at))
 }
 
 #[cfg(test)]

@@ -6,10 +6,8 @@ const api = vi.hoisted(() => ({
   getState: vi.fn(),
   setSettings: vi.fn(),
   setAppSettings: vi.fn(),
-  history: vi.fn(),
-  exportHistory: vi.fn(),
-  checkUpdates: vi.fn(),
   cliStatus: vi.fn(),
+  cliQuotas: vi.fn(async (): Promise<QuotaSet[]> => []),
   quitApp: vi.fn(),
   prettyError: vi.fn((e: unknown) => (e instanceof Error ? e.message : String(e))),
 }));
@@ -18,6 +16,7 @@ vi.mock("./api", () => api);
 
 import App from "./App";
 import { makeState } from "./test/fixtures";
+import type { QuotaSet } from "./api";
 
 function cliFixture() {
   return [
@@ -60,9 +59,9 @@ function cliFixture() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   api.getState.mockResolvedValue(makeState());
   api.cliStatus.mockResolvedValue(cliFixture());
-  api.checkUpdates.mockResolvedValue({ available: false });
 });
 
 afterEach(cleanup);
@@ -74,29 +73,58 @@ describe("App", () => {
     expect(screen.getByRole("status", { name: "Loading" })).toBeInTheDocument();
   });
 
-  it("loads the CLI status and renders one card per provider", async () => {
+  it("lists only connected providers plus the floating add button", async () => {
     const { container } = render(<App />);
 
-    expect(await screen.findByText("Providers")).toBeInTheDocument();
+    // Floating plus button only; no overview hero, no needs-attention text.
+    expect(
+      await screen.findByRole("button", { name: "Add account" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Connection overview")).not.toBeInTheDocument();
+    expect(screen.queryByText("1 of 2 ready")).not.toBeInTheDocument();
     // SVG brand marks carry their own <title>, so read the card headers.
     const titles = Array.from(
       container.querySelectorAll(".cli-card .row-title"),
       (el) => el.textContent,
     );
-    expect(titles).toHaveLength(2);
+    expect(titles).toHaveLength(1);
     expect(titles[0]).toContain("Claude");
-    expect(titles[1]).toContain("OpenAI Codex");
-    // The exact terminal command is shown for copy-paste, never executed here.
-    expect(screen.getByText("claude auth login")).toBeInTheDocument();
-    expect(screen.getByText("codex login")).toBeInTheDocument();
+    // The missing CLI is hidden from the list, reachable via plus.
+    expect(screen.queryByText("OpenAI Codex")).not.toBeInTheDocument();
+    expect(screen.queryByText("Add account")).not.toBeInTheDocument();
   });
 
-  it("marks logged-in and missing CLIs distinctly", async () => {
+  it("opens the guided setup for a missing provider", async () => {
+    const user = userEvent.setup();
     render(<App />);
+    await screen.findByRole("button", { name: "Add account" });
 
-    expect(await screen.findByText("Logged in")).toBeInTheDocument();
-    expect(screen.getByText("Not installed")).toBeInTheDocument();
-    expect(screen.getByText("CLI not found on PATH")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add account" }));
+    const pick = await screen.findByText("OpenAI Codex");
+    await user.click(pick.closest("button")!);
+
+    expect(await screen.findByText("curl -fsSL https://chatgpt.com/codex/install.sh | sh")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Check installation" }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens usage limits in a popup from the card icon", async () => {
+    const user = userEvent.setup();
+    api.cliQuotas.mockResolvedValue([
+      {
+        provider: "claude",
+        windows: [{ window: "5-hour", percent: 50, resetsAt: null, status: null }],
+        error: null,
+      },
+    ]);
+    render(<App />);
+    await screen.findByRole("button", { name: "Add account" });
+
+    await user.click(screen.getByRole("button", { name: "Usage limits for Claude" }));
+
+    expect(await screen.findByText("5-hour")).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
   });
 
   it("surfaces a load failure instead of an empty panel", async () => {
@@ -116,7 +144,7 @@ describe("App", () => {
   it("re-reads state and CLI status when the refresh button is used", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByText("Providers");
+    await screen.findByRole("button", { name: "Add account" });
 
     expect(api.getState).toHaveBeenCalledTimes(1);
     expect(api.cliStatus).toHaveBeenCalledTimes(1);
@@ -125,6 +153,19 @@ describe("App", () => {
     await waitFor(() => {
       expect(api.getState).toHaveBeenCalledTimes(2);
       expect(api.cliStatus).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("does not refresh when the panel regains focus by default", async () => {
+    render(<App />);
+    await screen.findByRole("button", { name: "Add account" });
+
+    expect(api.getState).toHaveBeenCalledTimes(1);
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => {
+      expect(api.getState).toHaveBeenCalledTimes(1);
+      expect(api.cliStatus).toHaveBeenCalledTimes(1);
     });
   });
 });

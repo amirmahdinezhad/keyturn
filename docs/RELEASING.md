@@ -1,24 +1,28 @@
 # Releasing
 
-Signed and notarized macOS builds, the auto-updater feed, Homebrew and Nix.
+The GitHub workflow is configured for signed, notarized universal macOS builds
+and an updater feed. Homebrew and Nix files are packaging templates.
+
+Create a native release build or publish a release only when explicitly asked.
+Routine verification uses the dev app; do not replace the installed app.
 
 ## One-time setup
 
 1. **Updater signing key**
 
    ```bash
-   npm run tauri signer generate -- -w ~/.tauri/keyturn.key
+   pnpm exec tauri signer generate -w ~/.tauri/keyturn.key
    ```
 
-   Put the public key into `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`
-   (replacing `REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY`) and keep the private key
-   for CI. Local builds keep `bundle.createUpdaterArtifacts` off so they work
-   without the key; the release workflow turns it on and signs the artifacts.
+   `src-tauri/tauri.conf.json` already contains an updater public key. Reuse its
+   matching private key for CI; generating a replacement requires updating the
+   public key too. The current workflow expects a passwordless private key.
+   Local config keeps `bundle.createUpdaterArtifacts` off; CI enables it.
 
 2. **Apple signing + notarization**
 
    Create a Developer ID Application certificate and an app-specific password
-   (or App Store Connect API key). CI expects these repository secrets:
+   for notarization. CI expects these repository secrets:
 
    | Secret | Value |
    | --- | --- |
@@ -29,7 +33,6 @@ Signed and notarized macOS builds, the auto-updater feed, Homebrew and Nix.
    | `APPLE_PASSWORD` | app-specific password |
    | `APPLE_TEAM_ID` | 10-character team id |
    | `TAURI_SIGNING_PRIVATE_KEY` | contents of the updater private key |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | its password |
 
 3. **Update endpoint**
 
@@ -44,9 +47,16 @@ git tag v0.2.0
 git push origin v0.2.0
 ```
 
-`.github/workflows/release.yml` builds a universal macOS bundle, signs and
-notarizes it, creates the GitHub release and attaches the `.dmg`, `.app.tar.gz`
-and `latest.json` (the updater feed).
+`.github/workflows/release.yml` installs dependencies with pnpm 11 and the frozen
+lockfile, builds a universal macOS bundle, and uses the configured secrets for
+signing/notarization. It creates a **draft** GitHub release with the native
+assets and `latest.json`. Validate the draft assets before publishing; clients
+check the latest published release.
+
+The dev updater UI can show the running version and check errors. Its mocked
+tests cover release notes, skip-version storage, download progress and
+install/relaunch. Actual installation requires a compatible signed release
+and is not part of the normal dev checklist.
 
 ## Homebrew
 
@@ -67,14 +77,15 @@ change, then replace the PNG.
 
 ## Nix
 
-`flake.nix` provides a dev shell and a package build. Point `version`/`src` at
-the release tag and run:
+`flake.nix` contains a dev shell and an unfinished package template. The package
+still has `npmDepsHash = pkgs.lib.fakeHash` and an npm-based install/build phase,
+while the release workflow uses pnpm. It has not been validated by the dev
+checklist; resolve dependency fetching and platform inputs before using it to
+distribute a release.
+
+After completing and validating the template, its package commands are:
 
 ```bash
-nix build .#keyturn
-nix run .#keyturn
+nix build .#default
+nix run .#default
 ```
-
-Because a Tauri build needs both Node and Rust dependencies, refresh the npm
-hash (`nix build` prints the expected value on mismatch) whenever
-`package-lock.json` changes.

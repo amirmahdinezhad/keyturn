@@ -252,15 +252,7 @@ fn probe_claude(binary: &Path) -> (Option<bool>, Option<String>, Option<String>,
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
         });
-    let detail = if logged_in {
-        Some(format!(
-            "Logged in{}",
-            method.as_deref().map(|m| format!(" via {m}")).unwrap_or_default()
-        ))
-    } else {
-        Some("Not logged in".to_string())
-    };
-    (Some(logged_in), method, email, account.or(detail.clone()))
+    (Some(logged_in), method, email, account)
 }
 
 /// `codex login status` exits 0 when credentials exist. Stdout is
@@ -346,41 +338,43 @@ fn opencode_auth_keys() -> Vec<String> {
     ids
 }
 
-/// `opencode auth list` prints a table; accept any provider-looking token.
-/// Keep it conservative: lowercase alnum + `-_.`, ignore headers.
+/// Parse provider rows, never headings, counts, auth types or file paths.
+/// Current OpenCode uses `● OpenCode Go api`; older versions used tables.
 fn parse_opencode_auth_list(stdout: &str) -> Vec<String> {
+    let mut plain = String::new();
+    let mut escape = false;
+    for ch in stdout.chars() {
+        if ch == '\u{1b}' {
+            escape = true;
+        } else if escape {
+            if ch.is_ascii_alphabetic() {
+                escape = false;
+            }
+        } else {
+            plain.push(ch);
+        }
+    }
     let mut out = Vec::new();
-    for token in stdout
-        .split(|c: char| c.is_whitespace() || c == '│' || c == '|' || c == ',')
-        .map(str::trim)
-    {
-        let t = token.to_lowercase();
-        if t.len() < 2 || t.len() > 40 {
-            continue;
-        }
-        if !t
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_' || c == '.')
-        {
-            continue;
-        }
-        if [
-            "provider",
-            "providers",
-            "authenticated",
-            "status",
-            "list",
-            "auth",
-            "opencode",
-            "none",
-            "connected",
-        ]
-        .contains(&t.as_str())
-        {
-            continue;
-        }
-        if !out.contains(&t) {
-            out.push(t);
+    for line in plain.lines() {
+        let row = line.trim().trim_start_matches('│').trim();
+        let id = if let Some(provider) = row.strip_prefix('●') {
+            let name = provider.trim();
+            let name = name.strip_suffix(" oauth").or_else(|| name.strip_suffix(" api")).unwrap_or(name).trim();
+            match name.to_lowercase().as_str() {
+                "opencode go" => "opencode-go".to_string(),
+                "opencode zen" | "opencode" => "opencode".to_string(),
+                "github copilot" => "github-copilot".to_string(),
+                _ => name.to_lowercase().replace(' ', "-"),
+            }
+        } else {
+            let fields: Vec<_> = row.split(|c: char| c.is_whitespace() || c == '│' || c == '|').filter(|s| !s.is_empty()).collect();
+            if fields.len() != 2 || !["connected", "active", "api", "oauth"].contains(&fields[1].to_lowercase().as_str()) {
+                continue;
+            }
+            fields[0].to_lowercase()
+        };
+        if !id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "-_.".contains(c)) && !out.contains(&id) {
+            out.push(id);
         }
     }
     out
@@ -465,7 +459,7 @@ fn status_for(spec: &CliSpec) -> ProviderCliStatus {
             // Enrich a logged-in row with the account the CLI cached.
             let (email, account) = if logged_in == Some(true) {
                 let st = crate::codex::status();
-                (st.email, st.account_id.or(st.plan))
+                (st.email, st.plan.or(st.account_id))
             } else {
                 (None, None)
             };
@@ -598,6 +592,13 @@ mod tests {
         assert!(parsed.contains(&"anthropic".to_string()));
         assert!(parsed.contains(&"openai".to_string()));
         assert!(!parsed.contains(&"provider".to_string()));
+    }
+
+    #[test]
+    fn opencode_auth_list_parses_real_cli_rows_without_phantom_services() {
+        let actual = "\u{1b}[0m\n┌  Credentials ~/.local/share/opencode/auth.json\n│\n●  OpenCode Go \u{1b}[90mapi\n│\n└  1 credentials\n";
+        assert_eq!(parse_opencode_auth_list(actual), vec!["opencode-go"]);
+        assert!(parse_opencode_auth_list("┌ Credentials\n└ 0 credentials\n").is_empty());
     }
 
     #[test]

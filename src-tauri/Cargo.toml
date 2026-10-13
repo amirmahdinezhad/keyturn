@@ -18,19 +18,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-# `custom-protocol` is enabled by the Tauri CLI on every build (asset
-# protocol); declaring it here keeps plain `cargo build` and `tauri build`
-# on identical feature sets so they share one artifact cache.
-tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png", "custom-protocol"] }
+# Tauri CLI enables `tauri/custom-protocol` for production builds only.
+# Development must leave it off so the panel loads Vite instead of embedded assets.
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
-tauri-plugin-notification = "2"
+tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rusqlite = { version = "0.40", features = ["bundled"] }
+reqwest = { version = "0.13", features = ["blocking", "json"] }
 dirs = "7"
 chrono = "0.4"
 base64 = "0.22"

@@ -1,121 +1,173 @@
 # Keyturn — frontend/backend contract (v3, CLI-only)
 
-Backend = Tauri v2 Rust commands. Frontend = React 19 + TS + Tailwind v4 + HeroUI v3.
-No other runtime deps. Icons: iconsax free set, Bold style only (`src/icons.tsx`); brand/model marks stay custom.
+Backend: Tauri v2 Rust commands. Frontend: React 19, TypeScript, Tailwind v4
+and local Shadcn Studio components backed by Radix. Variants use
+`class-variance-authority` and `clsx`. Icons use the iconsax Linear set plus
+local brand/usage marks. The tray uses `src-tauri/icons/tray-template.png`
+as a macOS template icon.
 
-## Auth model (T3-style)
+## Authentication and status
 
-Keyturn does NOT authenticate. No login flow, no sign-in window, no OAuth,
-no keychain writes, no credential-file patching. Each provider's own CLI owns
-its auth; the user runs the login command in their own terminal. The app only
-runs each CLI's read-only status command and shows the install/login guidance.
+Provider CLIs own authentication. Keyturn never runs login/install commands,
+opens a sign-in webview, patches credentials or writes to the keychain. It
+shows copyable instructions and probes installed CLIs read-only.
 
-| Provider | CLI binary | User runs | We run (read-only) |
-| -------- | ---------- | --------- | ------------------ |
+| Provider | Binary | User runs | Keyturn probes |
+| --- | --- | --- | --- |
 | Claude | `claude` | `claude auth login` | `claude auth status --json` |
-| OpenAI Codex | `codex` | `codex login` | `codex login status` |
-| OpenCode | `opencode` | `opencode auth login` | `opencode auth list` + auth.json keys |
-| Gemini | `gemini` | `gemini` (Sign in with Google) | file/env probe (no status cmd) |
+| OpenAI Codex | `codex` | `codex login` | `codex login status`, read-only auth-file identity |
+| OpenCode | `opencode` | `opencode auth login` | `opencode auth list`, auth-file service IDs |
+| Gemini | `gemini` | `gemini` | OAuth file or environment credentials |
 
-Anthropic / OpenAI / Google keys without their own CLI are managed through
-OpenCode (`opencode auth login anthropic|openai|google`).
+Binary lookup uses `PATH` and common installation directories. Version
+subprocesses have an 8-second timeout; status subprocesses use 10 seconds.
+They run on a blocking worker, outside the async runtime.
 
-## Commands (via `invoke`)
+## IPC shapes
 
 ```ts
 interface AppSettings {
-  refreshIntervalSecs: number            // 10..300
-  billingDay: number                     // 1..28
-  autoUpdateChecks: boolean
+  refreshIntervalSecs: number // 10..300, default 60
+  usageShowRemaining: boolean // default false
 }
-
 interface AppState {
   settings: { openAtLogin: boolean }
   app: AppSettings
 }
-
 interface ProviderCliStatus {
-  id: string                 // claude | codex | opencode | gemini
+  id: string
   label: string
-  binary: string             // default binary name, e.g. `claude`
+  binary: string
   binaryFound: boolean
   binaryPath?: string | null
   version?: string | null
-  loggedIn?: boolean | null  // null = unknown (CLI missing / probe failed)
+  loggedIn?: boolean | null // absent/unknown if the probe cannot determine it
   authMethod?: string | null
   email?: string | null
   account?: string | null
-  detail?: string | null     // human subtitle, e.g. "Logged in using ChatGPT"
-  loginCmd: string           // exact command the user runs in their terminal
+  detail?: string | null
+  loginCmd: string
   installUrl: string
-  authFile?: string | null   // credential file peeked at (read-only)
-  connected?: string[]       // OpenCode only: provider ids in auth.json
+  authFile?: string | null
+  connected?: string[] // OpenCode services; omitted when empty
+}
+interface QuotaWindow {
+  window: string
+  percent: number // USED, independent of the UI preference
+  resetsAt?: string | null
+  status?: string | null
+}
+interface QuotaSet {
+  provider: string // opencode | opencode-go | claude | codex
+  windows?: QuotaWindow[] | null
+  error?: string | null
+  asOf?: string | null // observation time for a local Claude snapshot
 }
 ```
 
-- `get_state() -> AppState`
-- `cli_status() -> ProviderCliStatus[]` — runs the CLI status probes, read-only
-- `set_settings({ openAtLogin }) -> AppState` — launch at login
-- `set_app_settings({ settings: Partial<AppSettings> }) -> AppState` — merges + normalizes
-- `history({ range }) -> HistoryOut` — range: `5h|24h|7d|30d|billing`
-- `export_history({ range, format }) -> string` — format: `json|csv`, returns the written path
-- `check_updates() -> { available, version?, notes?, error? }`
-- `quit_app() -> ()`
-- All errors are returned as human-readable strings.
+Rust omits absent optional status fields and empty `connected` arrays. The
+frontend tolerates missing/null optionals. These types mirror `src/types.ts`
+and `src/api.ts`; integration tests pin the status/settings field names.
 
-Removed (auth lived here): `save_key`, `delete_key`, `apply_key`,
-`add_provider`, `remove_provider`, `account_status`, `connect_account_webview`,
-`disconnect_account`, `set_active_account_cmd`, `console_keys`, `console_usage`,
-`activate_account_key`, `codex_status`, `codex_refresh`, `console_payload`,
-`list_sounds`, `play_sound`.
-Removed (profiles/themes lived here): `profile_create`, `profile_rename`,
-`profile_switch`, `profile_delete`; the `theme` setting.
-Deleted modules: `account` (OAuth/keychain/console scraping), `bridge`
-(console hash-bridge), `auth` (auth.json patching), `providers` (console
-registry; replaced by the `cli` status registry), `profiles` (replaced by
-the single-file `settings` module).
+| Invoke command | Result / behavior |
+| --- | --- |
+| `get_state()` | `AppState`; reconciles launch-at-login with the OS and compacts legacy app data. |
+| `cli_status()` | `ProviderCliStatus[]` for all four CLIs. |
+| `cli_quotas()` | `QuotaSet[]` from all available supported sources, sorted by provider. |
+| `set_settings({ openAtLogin })` | Applies the OS preference and returns reconciled `AppState`. |
+| `set_app_settings({ settings })` | Merges partial app preferences, normalizes cadence and returns `AppState`. |
+| `quit_app()` | Exits the native app. |
 
-## Semantics (backend owns)
+## Usage sources
 
-- **Settings**: one file (`agent-rtl.settings.json`) holds refresh cadence,
-  billing day and update checks; one store file (`agent-rtl.keys`) holds the
-  launch-at-login flag. History is the local usage DB aggregation. Legacy
-  sections (stored keys, switch log, accounts, themes, profiles) are
-  compacted out of the files on launch.
-- **CLI status** (`cli.rs`) never writes: binary lookup on `PATH` (+ Homebrew /
-  `/usr/local/bin` fallbacks), one short-lived status subprocess per provider
-  (10 s timeout), read-only peeks at the CLI auth files for display.
-- **Tray** (`tray.rs`) is a static bundled icon. Quota rendering, pace
-  markers and multi-profile cells are gone with stored keys/quotas.
-- **History** is read from the local usage DB, aggregated per time bucket with
-  no key attribution (no key filter).
-- **Notifications** are one-shot notices only (e.g. update available).
-- **Background loop** checks for updates every 24 h when enabled. Wake
-  detection lives in the frontend panel, which refreshes on focus.
-- Frontend only renders; refresh re-runs `get_state` + `cli_status`.
+A usage popup requests `cli_quotas` when mounted. The backend reads **all**
+available sources; `QuotaContent` filters by the popup's provider IDs. There
+is no periodic quota fetch, per-provider IPC argument or quota cache.
 
-## UI behaviors
+- **OpenCode:** `quota.rs` reads `opencode` and `opencode-go` keys from the CLI
+  auth file and requests the corresponding Zen `/usage` endpoint. It parses
+  rolling, weekly and monthly windows. 401 means the key was rejected; 403
+  shows the no-quota error. Requests time out after 10 seconds.
+- **Codex:** `codex.rs` reads a stored OAuth access token/account ID;
+  `quota.rs` requests `https://chatgpt.com/backend-api/wham/usage`. No OAuth
+  token means no source. Expired/rejected sessions return instructions rather
+  than refreshing or writing credentials. Window labels derive from duration;
+  `gpt-reserve` is hidden. Requests time out after 10 seconds.
+- **Claude:** `claude_usage.rs` recursively scans JSONL transcripts under the
+  Claude projects directory for matching tool-result JSON. It chooses the
+  newest record timestamp, parses 5-hour/weekly and optional Opus/Sonnet
+  weekly windows, and reports `asOf`. Missing snapshots produce no source.
+- **Gemini:** no quota source or usage button.
 
-- Header: refresh (re-reads state + CLI status), gear (settings modal),
-  quit icon; brand is the Keyturn logo (`AppLogo`) + `Keyturn`.
-- Main view: one `Providers` section with a card per CLI — logo, name, status
-  pill (`Logged in` green / `Not logged in` amber / `Not installed` gray),
-  version + binary path + account detail, connected chips for OpenCode
-  sub-providers, and the login command (or install link when the binary is
-  missing) in a copyable code row. A note states Keyturn never signs in and
-  the command must run in the user's own terminal, plus the OpenCode
-  sub-provider hint (`opencode auth login anthropic|openai|google`).
-- Loading skeleton until first state; `EmptyState` on load/CLI-probe failure;
-  toast bottom-center; radius 6 controls / 10 cards; accent #007aff.
-- Settings modal: tabs (General, Advanced) with
-  refresh cadence, billing day, history/export, updates.
+The UI shows exact percentages and reset countdowns. Remaining mode inverts
+used percentages and clamps them to 0–100; warning colors still derive from
+used percentages. Missing data and source errors are shown explicitly.
 
-## Frontend structure
+## Persistence and panel lifecycle
 
-- `src/types.ts`, `src/api.ts` (invoke wrappers), `src/format.ts` (money, tokens,
-  exact decimals, model marks, avatar hues), `src/logos.tsx`, `src/App.tsx` + `src/components/*`
-  (`CliProviders`, `SettingsModal`, `HistoryModal`, …).
-- `src/index.css`: `@import "@heroui/styles";` then the app tokens; new components append their own block
-  at the end of the file.
-- `HeroUIProvider` at root. Prefer HeroUI Button/Modal/Input/Switch/Progress/Avatar/Chip/Skeleton with
-  className overrides to match the tokens exactly; custom CSS where HeroUI fights you.
+- `agent-rtl.settings.json` stores refresh cadence and quota wording.
+  Reading it normalizes values and rewrites legacy unknown preferences.
+- `agent-rtl.keys` stores only launch-at-login. The OS is the source of truth;
+  recognized legacy key/account/theme sections are compacted on startup.
+- `displayPrefs.ts` stores frontend preferences in `keyturn.displayPrefs`:
+  CLI version visibility, compact rows, focus refresh, automatic update check
+  on opening the Updates tab, theme and accent. Defaults use dark/blue, visible versions
+  and disabled focus/update checks. Skipped versions use
+  `keyturn.skippedUpdateVersion`.
+- Paths are defined in `paths.rs`; `KEYTURN_OPENCODE_USERDATA` overrides app
+  data, `CODEX_HOME` overrides Codex auth, `XDG_DATA_HOME` overrides OpenCode
+  auth and `CLAUDE_CONFIG_DIR` overrides Claude transcript home.
+- The tray toggles the existing main webview and anchors it under the icon,
+  clamped to the monitor. Losing focus hides it. Opening never reloads it.
+- Status refresh reads settings and all CLI statuses on mount/manual refresh,
+  at the configured interval while focused, or after detected timer drift.
+  Refresh on focus is optional and off by default. Vite HMR updates dev UI.
+
+## UI behavior
+
+- Header: Keyturn brand, last status refresh age, Refresh, Settings and Quit.
+- Main list: connected accounts only (`binaryFound && loggedIn === true`),
+  count, identity, readable auth/plan/services and optional CLI version. Paths
+  and internal account IDs stay out of cards. Add account is a floating button.
+- Add account: pick a provider, then Install if missing, Sign in and Done.
+  The stepper begins after provider selection. Fresh status validates each
+  stage; the wizard never executes installation or login commands.
+- Usage: a card icon opens `UsageModal`; limits do not render inline.
+- Settings tabs: General / Display / Updates. Cadence offers 30/60/120-second
+  presets plus a selected custom saved value, with controls disabled while
+  saving. General contains the reset action. Display contains used/left
+  selection, appearance presets and detail/density controls. Tab motion respects
+  keyboard interaction and reduced-motion preferences.
+- Loading skeleton until settings arrive, explicit load/probe errors and toast
+  feedback. A plain browser has no Tauri IPC and shows the expected load error.
+- Updates use `@tauri-apps/plugin-updater` and `plugin-process` in the frontend:
+  check, release notes, download/skip, progress, install and relaunch. Current
+  version comes from `core:app:allow-version`; there are no backend update
+  commands. An optional automatic check runs when the Updates tab opens.
+- The release workflow expects the matching passwordless signing private key,
+  creates a draft universal macOS release and includes `latest.json`.
+
+## Structure
+
+`src/App.tsx` coordinates status refresh and modals. `src/api.ts` owns invoke
+wrappers; `src/types.ts` mirrors backend preferences. `src/components/ui/`
+contains locally owned Radix components with source/license notes. CSS tokens
+and component styles live in `src/index.css`. Rust modules own CLI probing,
+quota sources, local settings/store persistence, paths and the tray shell.
+
+Removed functionality includes stored key switching, profiles, console login,
+history/export, threshold notifications, sounds and automatic key switching.
+The old `account`, `bridge`, `auth`, `providers`, `profiles`, `notify`, `history`
+and `usage` modules are absent.
+
+## Development workflow (standing rules)
+
+- **Test locally, always.** Verification happens on the dev build
+  (`pnpm tauri dev`) — never on the installed app.
+- **Never ship a release build unless asked.** No `pnpm tauri build`, no DMG,
+  no copy to Desktop or `/Applications`, until the user explicitly says
+  "take an output" (خروجی بگیر). Release builds are slow, flaky on this
+  toolchain, and overwrite what the user is testing.
+- **After every task, restart dev** without asking (kill the old
+  `target/debug/keyturn` + vite first; single-instance would otherwise
+  shadow the new launch).

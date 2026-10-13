@@ -5,7 +5,7 @@
   "identifier": "com.7skylab.keyturn",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:5174",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -59,7 +59,7 @@
       "endpoints": [
         "https://github.com/7SkyLab/keyturn/releases/latest/download/latest.json"
       ],
-      "pubkey": "REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY",
+      "pubkey": "RWRZSxnd3eKgyR3TF0IVDKLHQ8ZfgexuY5dV8H4Er5a9C6oOmshWYYTM",
       "windows": {
         "installMode": "passive"
       }

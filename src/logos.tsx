@@ -1,6 +1,6 @@
 // Brand marks baked from @lobehub/icons-static-svg (mono marks, viewBox 0 0 24 24).
 // Ported 1:1 from the Electron model-logos.js — inner SVG content only.
-import { Avatar } from "@heroui/react";
+import { Avatar, AvatarFallback } from "./components/ui/avatar";
 import appIcon from "./assets/app-icon.png";
 import appIcon2x from "./assets/app-icon@2x.png";
 import { hashHue, modelLogoKey } from "./format";
@@ -56,7 +56,7 @@ export function ModelMark({ model }: { model: string }) {
         className="micon"
         style={{ background: `hsl(${hashHue(model)} 45% 45%)` }}
       >
-        {model.charAt(0).toUpperCase()}
+        <AvatarFallback>{model.charAt(0).toUpperCase()}</AvatarFallback>
       </Avatar>
     );
   }
@@ -104,7 +104,7 @@ export function ProviderLogo({ provider }: { provider: string }) {
       className="plogo avatar"
       style={{ background: `hsl(${hashHue(provider)} 40% 42%)` }}
     >
-      {provider.charAt(0).toUpperCase()}
+      <AvatarFallback>{provider.charAt(0).toUpperCase()}</AvatarFallback>
     </Avatar>
   );
 }

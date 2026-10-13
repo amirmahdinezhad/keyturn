@@ -2,10 +2,14 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { applyDisplayPrefs, loadDisplayPrefs } from "./displayPrefs";
 
-// Note: @heroui/react v3 (the installed version) ships no HeroUIProvider —
-// its RAC-based components manage their own overlay/focus state, so the app
-// renders without a global provider. See the delivery summary.
+// Paint theme + accent before first paint so the panel never flashes.
+try {
+  applyDisplayPrefs(loadDisplayPrefs());
+} catch {
+  // Non-DOM or private mode: App re-applies on mount.
+}
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

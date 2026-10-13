@@ -1,5 +1,17 @@
 name: release
 
+# Publishes signed, notarized builds plus the updater feed (`latest.json`).
+#
+# REQUIRED SECRETS (repo Settings → Secrets and variables → Actions):
+#   TAURI_SIGNING_PRIVATE_KEY  — content of ~/.tauri/keyturn.key
+#                                (passwordless minisign key; no *_PASSWORD needed)
+#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY /
+#   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID — Apple notarization.
+#
+# FLOW: push a v* tag (e.g. `git tag v0.2.0 && git push origin v0.2.0`) →
+# a DRAFT release appears with the DMG + latest.json → test the DMG once →
+# publish the release. Clients pick it up via Settings → Check now.
+
 on:
   push:
     tags:
@@ -14,10 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -28,7 +44,7 @@ jobs:
           workspaces: src-tauri
 
       - name: Install frontend dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Build, sign, notarize and publish
         uses: tauri-apps/tauri-action@v0
@@ -41,7 +57,6 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Keyturn ${{ github.ref_name }}"
@@ -50,4 +65,4 @@ jobs:
           prerelease: false
           # Updater artifacts are produced in CI (a local build without the
           # signing key would fail with createUpdaterArtifacts enabled).
-          args: --target universal-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":true}}' 
+          args: --target universal-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":true}}'

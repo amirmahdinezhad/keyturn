@@ -5,11 +5,8 @@ const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
 
 import {
-  checkUpdates,
   cliStatus,
-  exportHistory,
   getState,
-  history,
   prettyError,
   quitApp,
   setAppSettings,
@@ -26,10 +23,7 @@ describe("api invoke wrappers", () => {
     const cases: Array<[Promise<unknown>, string, unknown]> = [
       [getState(), "get_state", undefined],
       [setSettings(true), "set_settings", { openAtLogin: true }],
-      [setAppSettings({ billingDay: 15 }), "set_app_settings", { settings: { billingDay: 15 } }],
-      [history("7d"), "history", { range: "7d" }],
-      [exportHistory("30d", "csv"), "export_history", { range: "30d", format: "csv" }],
-      [checkUpdates(), "check_updates", undefined],
+      [setAppSettings({ refreshIntervalSecs: 120 }), "set_app_settings", { settings: { refreshIntervalSecs: 120 } }],
       [cliStatus(), "cli_status", undefined],
       [quitApp(), "quit_app", undefined],
     ];
@@ -48,8 +42,8 @@ describe("api invoke wrappers", () => {
   });
 
   it("resolves with whatever the backend returned", async () => {
-    invokeMock.mockResolvedValue({ available: true, version: "9.9.9" });
-    await expect(checkUpdates()).resolves.toEqual({ available: true, version: "9.9.9" });
+    invokeMock.mockResolvedValue([{ id: "claude" }]);
+    await expect(cliStatus()).resolves.toEqual([{ id: "claude" }]);
   });
 });
 

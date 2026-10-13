@@ -1,87 +1,96 @@
 # Keyturn
 
-Menubar key manager for AI coding CLIs. It keeps API keys for OpenCode, Claude,
-OpenAI, Gemini and Codex CLI in one place, watches their quotas, and switches
-the key your CLI actually uses — automatically when a key runs out.
+A macOS menu-bar panel for AI coding CLI accounts and usage limits. Keyturn
+checks Claude, OpenAI Codex, OpenCode and Gemini, then shows the CLIs that are
+installed and signed in.
 
-Tauri v2 (Rust) + React 19 + Tailwind v4 + HeroUI v3.
+Authentication belongs to each provider's CLI. Keyturn displays installation
+and sign-in instructions; it does not run them, store keys or patch CLI
+credentials.
+
+Built with Tauri v2, Rust, React 19, TypeScript and Tailwind v4. Local UI
+components follow Shadcn Studio composition with Radix interaction primitives.
 
 ## Features
 
-**Keys and providers**
-- One store per provider; apply a key writes it straight into the credential
-  file the CLI reads (`~/.local/share/opencode/auth.json`, `~/.codex/auth.json`)
-  with atomic 0600 writes.
-- Provider registry with capability flags (`src-tauri/src/providers.rs`):
-  console sign-in, quota API, auth patch and token refresh are data, not
-  hard-coded branches. See `docs/ADDING_A_PROVIDER.md`.
-- Codex: reads `$CODEX_HOME/auth.json`, patches only `OPENAI_API_KEY`, keeps
-  OAuth tokens, and can refresh them (public Codex client id, `last_refresh`
-  updated).
-- Console sign-in for OpenCode / Claude / OpenAI / Gemini in an in-app webview;
-  multiple accounts per provider, each with its own cookie jar.
+- Connected accounts with identity, sign-in method, plan when available,
+  optional CLI version and named OpenCode services.
+- An Add account wizard: choose a provider, install if needed, sign in in your
+  own terminal, then verify with a fresh CLI status check.
+- Usage limits in a separate popup, with percentage bars and reset countdowns:
 
-**Profiles**
-- Unlimited profiles. Each one has its own keys, signed-in accounts, switch log,
-  theme and history; display/alert settings stay app-wide.
-- Profile menu in the panel header, multi-profile menu-bar cells with an active
-  indicator.
+  | CLI | Source used by Keyturn |
+  | --- | --- |
+  | OpenCode | Live usage requests for `opencode` and `opencode-go` entries in its auth file. |
+  | OpenAI Codex | Usage request with the CLI's stored OAuth access token. API-key logins do not provide this quota source. |
+  | Claude | Newest matching rate-limit snapshot in local JSONL transcripts, with its observation age. No snapshot means no data. |
+  | Gemini | No usage popup. |
 
-**Monitoring**
-- Quota windows (5-hour / weekly / monthly) per key from the provider's usage
-  endpoint, cached for 60 s.
-- Local usage attribution from the OpenCode SQLite DB: cost and tokens per key
-  and per model, scoped to the calendar month, including a `untracked` bucket
-  for usage that predates the switch log.
-- Pace projection with six levels (Comfortable → Runaway) and a coloured marker
-  on every quota bar.
-- Reset countdown in three modes: clock, remaining, or both, with system/12h/24h
-  clock formatting; quota percentages can read used, remaining, or both.
-- History charts for 5h / 24h / 7d / 30d / billing cycle with JSON and CSV
-  export (written to your Downloads folder).
+- Settings for launch at login, refresh cadence, used/remaining percentages,
+  compact rows, CLI versions, dark/light/system appearance and four accents.
+- Manual update checks, release notes, download progress, skip a version, and
+  install/relaunch. An optional automatic check runs when the Updates tab opens.
+- A static monochrome menu-bar icon. Clicking it toggles the existing panel
+  without recreating the webview. Refresh on focus is off by default.
 
-**Alerts and automation**
-- Threshold notifications at 75/90/95 % plus one custom threshold, with a
-  system sound picker and preview. Latches re-arm with 5 % hysteresis.
-- Auto-switch: when a key hits 100 %, a non-ok status or a 429, the app moves
-  to the least-used healthy key, logs the switch and notifies you.
-- Background refresh loop keeps the tray, quotas, alerts and auto-switch fresh
-  while the panel is closed, and forces a refresh after the machine wakes.
-- Refresh interval configurable from 10 to 300 seconds.
-
-**Menu bar**
-- Five icon styles: Battery, Progress Bar, Percentage, Icon with Bar, Compact.
-- Three colour modes: threshold colours, monochrome template (adapts to the
-  system menu bar), or a custom hex colour.
-- Simultaneous metrics, percent or tokens, used or remaining, optional labels
-  and pace markers.
+Status refresh runs on startup, on request, at the configured interval while
+the panel has focus, and when interval drift suggests wake from sleep. The
+default is 60 seconds; the backend accepts 10–300 seconds. Usage requests run
+when a usage popup mounts. The backend reads all available quota sources and
+the popup filters the result for its provider.
 
 ## Development
 
 ```bash
-npm install
-npm run tauri dev        # app + HMR
-npm run build            # type-check + frontend bundle
-pnpm test                # frontend unit / component / integration tests
-cargo test               # Rust unit + integration tests (in src-tauri)
+pnpm install --frozen-lockfile
+pnpm run run
 ```
 
-See `docs/TESTING.md` for what each layer covers and the full pre-commit set.
+This starts Vite on **http://localhost:5174/** and the native Tauri dev app.
+Use the menu-bar icon to open the actual panel. A browser preview has no Tauri
+IPC and is expected to show a settings-load error.
 
-## Data files
+If Vite is already running:
 
-| Path | Contents |
+```bash
+pnpm exec tauri dev --config '{"build":{"devUrl":"http://localhost:5174","beforeDevCommand":""}}'
+```
+
+Keep port 5174 and `strictPort`. Leave `custom-protocol` out of permanent Tauri
+features so dev uses Vite and HMR. Do not create a release bundle unless the
+user explicitly requests one.
+
+```bash
+pnpm exec tsc --noEmit
+pnpm exec vitest run
+cd src-tauri
+cargo check --offline
+cargo test --offline
+```
+
+See [Testing](docs/TESTING.md) for native panel and HMR checks.
+
+## Local data
+
+| Location on macOS | Purpose |
 | --- | --- |
-| `~/Library/Application Support/ai.opencode.desktop/agent-rtl.keys` | Default profile (same JSON as the Electron app `agent-keyring`) |
-| `…/agent-rtl.keys.<profile>` | Extra profiles |
-| `…/agent-rtl.profiles.json` | Profile index + app-wide settings |
-| `~/.local/share/opencode/auth.json` | OpenCode credential patch target |
-| `~/.codex/auth.json` | Codex credential patch target |
-| macOS Keychain (`com.7skylab.keyturn`) | Console OAuth tokens and session cookies |
+| `~/Library/Application Support/ai.opencode.desktop/agent-rtl.keys` | Launch-at-login flag; the OS is the source of truth. |
+| `…/agent-rtl.settings.json` | Refresh cadence and used/remaining preference. |
+| Webview localStorage: `keyturn.displayPrefs` | Appearance, density, version display, focus refresh and automatic update-check preference. |
+| Webview localStorage: `keyturn.skippedUpdateVersion` | Skipped updater version. |
+| `~/.local/share/opencode/auth.json` | Read-only OpenCode credentials and connected services. Honors `XDG_DATA_HOME`. |
+| `~/.codex/auth.json` | Read-only Codex identity and OAuth access token. Honors `CODEX_HOME`. |
+| `~/.claude/projects/**/*.jsonl` | Read-only Claude quota snapshots. Honors `CLAUDE_CONFIG_DIR`. |
+| `~/.gemini/oauth_creds.json` / Gemini environment variables | Read-only Gemini authentication detection. |
+
+`KEYTURN_OPENCODE_USERDATA` overrides Keyturn's application-data directory for
+isolated testing. On startup, recognized legacy keys/accounts/profile-era
+preferences are removed from Keyturn's own store/settings files. Provider
+credential files are never written by Keyturn.
 
 ## Docs
 
-- `CONTRACT.md` — frontend/backend IPC contract.
-- `docs/ADDING_A_PROVIDER.md` — how to add a provider.
-- `docs/RELEASING.md` — signing, notarization, updater, Homebrew and Nix.
-- `docs/TESTING.md` — test layers, commands, and what is not covered.
+- [Frontend/backend contract](CONTRACT.md)
+- [Adding a provider](docs/ADDING_A_PROVIDER.md)
+- [Testing](docs/TESTING.md)
+- [Release workflow and packaging templates](docs/RELEASING.md)

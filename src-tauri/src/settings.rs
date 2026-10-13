@@ -1,8 +1,7 @@
 //! App-wide settings (single file, no profiles).
 //!
-//! Profiles lived here in v3 and are gone: one user, one settings file
-//! (`agent-rtl.settings.json`). Only live preferences remain — panel refresh
-//! cadence, history billing day and update checks.
+//! One settings file (`agent-rtl.settings.json`) holds panel refresh cadence
+//! and used/remaining quota wording. Legacy preferences are compacted on read.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -13,27 +12,20 @@ fn default_refresh() -> u32 {
     60
 }
 
-fn default_billing_day() -> u32 {
-    1
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     /// Panel refresh cadence in seconds (clamped to 10..=300).
     pub refresh_interval_secs: u32,
-    /// Day of month a billing cycle starts (used by the history chart).
-    pub billing_day: u32,
-    /// Update checks are opt-in. Kept here so the UI can say so.
-    pub auto_update_checks: bool,
+    /// Show remaining quota instead of used quota in percent displays.
+    pub usage_show_remaining: bool,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         AppSettings {
             refresh_interval_secs: default_refresh(),
-            billing_day: default_billing_day(),
-            auto_update_checks: false,
+            usage_show_remaining: false,
         }
     }
 }
@@ -42,15 +34,25 @@ impl AppSettings {
     /// Keep every value inside the range the UI expects.
     pub fn normalize(&mut self) {
         self.refresh_interval_secs = self.refresh_interval_secs.clamp(10, 300);
-        self.billing_day = self.billing_day.clamp(1, 28);
     }
 }
 
 pub fn read_settings(path: &Path) -> AppSettings {
-    let mut settings: AppSettings = paths::read_json(path)
-        .and_then(|v| serde_json::from_value(v).ok())
+    let raw = paths::read_json(path);
+    let mut settings: AppSettings = raw
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
     settings.normalize();
+    // Compact legacy files once: unknown keys are dropped on rewrite.
+    if let Some(serde_json::Value::Object(map)) = raw {
+        if map
+            .keys()
+            .any(|k| k != "refreshIntervalSecs" && k != "usageShowRemaining")
+        {
+            write_settings(path, &settings);
+        }
+    }
     settings
 }
 
@@ -87,10 +89,8 @@ mod tests {
     fn defaults_are_sane_and_are_clamped() {
         let mut app = AppSettings::default();
         app.refresh_interval_secs = 1;
-        app.billing_day = 99;
         app.normalize();
         assert_eq!(app.refresh_interval_secs, 10);
-        assert_eq!(app.billing_day, 28);
     }
 
     #[test]
@@ -102,11 +102,30 @@ mod tests {
         let settings = read_settings(&file);
         assert_eq!(settings.refresh_interval_secs, 60);
         let (saved, ()) = update_settings(&file, |s| {
-            s.billing_day = 15;
+            s.refresh_interval_secs = 120;
             Ok(())
         })
         .unwrap();
-        assert_eq!(saved.billing_day, 15);
+        assert_eq!(saved.refresh_interval_secs, 120);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn legacy_keys_are_compacted_on_read() {
+        let dir =
+            std::env::temp_dir().join(format!("keyturn-settings-legacy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("agent-rtl.settings.json");
+        std::fs::write(
+            &file,
+            r#"{"refreshIntervalSecs":30,"billingDay":15,"autoUpdateChecks":true}"#,
+        )
+        .unwrap();
+        let settings = read_settings(&file);
+        assert_eq!(settings.refresh_interval_secs, 30);
+        let raw = std::fs::read_to_string(&file).unwrap();
+        assert!(!raw.contains("billingDay"), "legacy keys must be gone");
+        assert!(!raw.contains("autoUpdateChecks"), "legacy keys must be gone");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

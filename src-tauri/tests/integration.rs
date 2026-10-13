@@ -1,7 +1,7 @@
 //! Cross-module integration tests.
 //!
 //! These exercise what the inline unit tests cannot: the frozen IPC contract the
-//! React frontend depends on, and the public store/profiles/filesystem surface
+//! React frontend depends on, and the public settings/store/filesystem surface
 //! as an outside consumer sees it.
 
 use std::fs;
@@ -90,7 +90,7 @@ fn app_settings_keys_are_camel_case_for_the_ui() {
 
     let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
     keys.sort_unstable();
-    let mut expected = ["refreshIntervalSecs", "billingDay", "autoUpdateChecks"];
+    let mut expected = ["refreshIntervalSecs", "usageShowRemaining"];
     expected.sort_unstable();
     assert_eq!(keys, expected, "AppSettings field names are the IPC contract");
 }
@@ -223,13 +223,22 @@ fn settings_round_trip_through_the_public_api() {
     assert_eq!(fresh.refresh_interval_secs, 60);
 
     let (saved, ()) = keyturn_lib::settings::update_settings(&file, |s| {
-        s.billing_day = 15;
+        s.refresh_interval_secs = 120;
         Ok(())
     })
     .expect("update settings");
-    assert_eq!(saved.billing_day, 15);
+    assert_eq!(saved.refresh_interval_secs, 120);
     assert_eq!(
-        keyturn_lib::settings::read_settings(&file).billing_day,
-        15
+        keyturn_lib::settings::read_settings(&file).refresh_interval_secs,
+        120
+    );
+}
+
+#[test]
+#[cfg(debug_assertions)]
+fn development_uses_live_frontend() {
+    assert!(
+        tauri::is_dev(),
+        "Development must load the live Vite frontend, not embedded dist assets"
     );
 }

@@ -1,17 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { AppModal } from "./AppModal";
-
-// React Aria emits this when a PressResponder has no pressable child. Modal.Root
-// used to wrap every modal in a DialogTrigger, which produced one warning per
-// mounted modal that never had a trigger.
-const PRESS_RESPONDER_WARNING = "A PressResponder was rendered without a pressable child";
-
-function pressResponderWarnings(spy: { mock: { calls: unknown[][] } }): unknown[][] {
-  return spy.mock.calls.filter((args) =>
-    args.some((arg) => String(arg).includes(PRESS_RESPONDER_WARNING)),
-  );
-}
 
 function renderModal(open: boolean, onClose: () => void = () => {}) {
   return render(
@@ -27,10 +18,32 @@ describe("AppModal", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders without React Aria's childless PressResponder warning", () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    renderModal(false);
-    expect(pressResponderWarnings(warn)).toHaveLength(0);
+  it("closes on Escape and returns focus to the button that opened it", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>Show detail</button>
+          <AppModal
+            open={open}
+            onClose={() => setOpen(false)}
+            title="Cost detail"
+          >
+            the-body
+          </AppModal>
+        </>
+      );
+    }
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Show detail" });
+    await user.click(trigger);
+    expect(
+      screen.getByRole("dialog", { name: "Cost detail" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   it("shows its title and body when open", () => {
