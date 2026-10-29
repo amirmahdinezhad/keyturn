@@ -96,7 +96,8 @@ function verifyDirectory(directory) {
   const app = path.join(extract, "Keyturn.app");
   const appVersion = run("/usr/libexec/PlistBuddy", ["-c", "Print CFBundleShortVersionString", path.join(app, "Contents/Info.plist")], { encoding: "utf8", stdio: "pipe" }).trim();
   assert.equal(appVersion, version, "Bundled app version differs.");
-  run("lipo", ["-verify_arch", "arm64", "x86_64", path.join(app, "Contents/MacOS/keyturn")]);
+  const architectures = run("lipo", ["-archs", path.join(app, "Contents/MacOS/keyturn")], { encoding: "utf8", stdio: "pipe" }).trim().split(/\s+/).sort();
+  assert.deepEqual(architectures, ["arm64", "x86_64"], "Release app must contain both CPU architectures.");
   run("codesign", ["--verify", "--deep", "--strict", app]);
   run("hdiutil", ["verify", path.join(directory, `Keyturn_${version}_universal.dmg`)]);
   console.log(`Keyturn ${version}: notes, universal app, DMG, checksums and updater signature verified.`);
