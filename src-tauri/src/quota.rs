@@ -3,8 +3,8 @@
 //! Two sources, both read-only:
 //! - OpenCode: `GET {base}/usage` with the CLI's own API key as `Bearer`.
 //! - Codex: `GET https://chatgpt.com/backend-api/wham/usage` with the CLI's
-//!   own OAuth access token. The frontend requests quotas when a usage popup
-//!   mounts; each request reads all available sources before UI filtering.
+//!   own OAuth access token. Usage popups read all available sources before
+//!   UI filtering; the native menu-bar monitor reads only its selected source.
 //!
 //! Honest failures (shown verbatim in the UI):
 //! - 401 / expired token → sign in again / open Codex once to refresh,
@@ -49,7 +49,8 @@ fn quota_base(entry_id: &str) -> Option<&'static str> {
     }
 }
 
-fn parse_windows(json: &serde_json::Value) -> Option<Vec<QuotaWindow>> {
+/// Shared by quota display and Go subscription renewal detection.
+pub(crate) fn parse_windows(json: &serde_json::Value) -> Option<Vec<QuotaWindow>> {
     let usage = json.get("usage")?;
     if !usage.is_object() {
         return None;
@@ -99,6 +100,7 @@ fn fetch_entry(entry_id: &str, base: &str, api_key: &str) -> QuotaSet {
         as_of: None,
     };
     let client = match reqwest::blocking::Client::builder()
+        .user_agent(concat!("Keyturn/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(10))
         .build()
     {
@@ -166,6 +168,21 @@ pub fn opencode_quotas() -> Vec<QuotaSet> {
     out
 }
 
+/// Fetch only the chosen menu-bar source; never probe unrelated accounts.
+pub fn provider_quota(provider: crate::settings::MenuBarProvider) -> Option<QuotaSet> {
+    use crate::settings::MenuBarProvider;
+    match provider {
+        MenuBarProvider::Codex => codex_quota_set(),
+        MenuBarProvider::Claude => crate::claude_usage::claude_quota_set(),
+        MenuBarProvider::Opencode | MenuBarProvider::OpencodeGo => {
+            let id = provider.id();
+            let raw = paths::read_json(&paths::open_code_auth_file())?;
+            let key = raw.get(id)?.get("key")?.as_str().filter(|s| !s.is_empty())?;
+            Some(fetch_entry(id, quota_base(id)?, key))
+        }
+    }
+}
+
 /// Label a Codex window by its duration, never by its position: plans move
 /// windows around (a 604800s primary is the weekly bucket, not "5-hour").
 fn codex_window_label(seconds: i64) -> String {
@@ -197,7 +214,13 @@ fn codex_window(bucket: &serde_json::Value, label: String) -> Option<QuotaWindow
 /// when no OAuth session exists (API-key logins have no wham quota);
 /// otherwise a set with windows or a human error. Never writes.
 pub fn codex_quota_set() -> Option<QuotaSet> {
-    let (token, account_id, expires_at) = codex::oauth_access()?;
+    let raw = paths::read_json(&paths::codex_auth_file())?;
+    codex_quota_from_auth(&raw)
+}
+
+/// Read the usage of a saved login without activating it.
+pub fn codex_quota_from_auth(raw: &serde_json::Value) -> Option<QuotaSet> {
+    let (token, account_id, expires_at) = codex::oauth_access_from(raw)?;
     let fail = |error: String| QuotaSet {
         provider: "codex".to_string(),
         windows: None,

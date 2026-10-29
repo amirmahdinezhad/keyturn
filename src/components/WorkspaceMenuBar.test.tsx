@@ -1,0 +1,61 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { WorkspaceMenuBar } from "./WorkspaceMenuBar";
+import { DEFAULT_APP_SETTINGS, DEFAULT_WORKSPACE_USAGE, type CodexProfile, type Workspace } from "../types";
+const api = vi.hoisted(() => ({ codexProfileQuota: vi.fn(), claudeProfileQuota: vi.fn(), antigravityAccountQuota: vi.fn() }));
+vi.mock("../api", async (original) => ({ ...await original<typeof import("../api")>(), ...api }));
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+const account = (id: string): CodexProfile => ({ id, name: id, email: `${id}@example.com`, plan: null, connected: true, active: false, needsActivation: false, connectionError: null, loginCommand: "" });
+it("offers only member providers and reads the active member account", async () => {
+  const user = userEvent.setup(); const save = vi.fn();
+  const workspace: Workspace = { id: "studio", name: "Studio", accent: "#007aff", accountIds: ["one", "two"], claudeAccountIds: [], antigravityAccountIds: [], usage: { ...DEFAULT_WORKSPACE_USAGE, menuBarAccountId: "one" } };
+  api.codexProfileQuota.mockImplementation(async (id) => ({ provider: "codex", windows: [{ window: id === "one" ? "weekly" : "monthly", percent: 20 }] }));
+  const props = { app: DEFAULT_APP_SETTINGS, accounts: [{ ...account("one"), active: true }, account("two"), account("outsider")], claudeAccounts: [], googleAccounts: [], busy: false, onSave: save };
+  render(<WorkspaceMenuBar {...props} workspace={workspace} />);
+  expect(await screen.findByRole("switch", { name: "Show one Weekly limit" })).toBeInTheDocument();
+  expect(api.codexProfileQuota).toHaveBeenCalledExactlyOnceWith("one");
+  await user.click(screen.getByRole("combobox", { name: "Menu bar provider" }));
+  expect(screen.getAllByRole("option")).toHaveLength(1);
+  expect(screen.queryByRole("option", { name: "Claude" })).not.toBeInTheDocument();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("combobox", { name: "Menu bar account" })).not.toBeInTheDocument();
+  expect(api.codexProfileQuota).not.toHaveBeenCalledWith("two");
+  expect(api.codexProfileQuota).not.toHaveBeenCalledWith("outsider");
+});
+
+it("defaults to percentages and saves the progress style without changing account or windows", async () => {
+  const user = userEvent.setup(); const save = vi.fn();
+  api.codexProfileQuota.mockResolvedValue({ provider: "codex", windows: [{ window: "5-hour", percent: 30 }, { window: "weekly", percent: 60 }] });
+  const workspace: Workspace = { id: "studio", name: "Studio", accent: "#007aff", accountIds: ["one"], claudeAccountIds: [], usage: { ...DEFAULT_WORKSPACE_USAGE, menuBarStyle: undefined, accountWindows: { one: ["5-hour", "weekly"] } } };
+  const props = { app: DEFAULT_APP_SETTINGS, accounts: [{ ...account("one"), active: true }], claudeAccounts: [], googleAccounts: [], busy: false, onSave: save };
+  const view = render(<WorkspaceMenuBar {...props} workspace={workspace} />);
+  expect(screen.getByRole("combobox", { name: "Menu bar display style" })).toHaveTextContent("Percentages");
+  expect(await screen.findByRole("switch", { name: "Show one Weekly limit" })).toBeChecked();
+  await user.click(screen.getByRole("combobox", { name: "Menu bar display style" }));
+  await user.click(screen.getByRole("option", { name: "Progress bars" }));
+  expect(save).toHaveBeenCalledExactlyOnceWith({ menuBarStyle: "progress" });
+  view.rerender(<WorkspaceMenuBar {...props} workspace={{ ...workspace, usage: { ...workspace.usage, menuBarStyle: "progress" } }} />);
+  expect(screen.getByRole("combobox", { name: "Menu bar display style" })).toHaveTextContent("Progress bars");
+  expect(screen.getByRole("switch", { name: "Show one 5-hour limit" })).toBeChecked();
+  expect(screen.getByRole("switch", { name: "Show one Weekly limit" })).toBeChecked();
+});
+
+it("follows the live Codex account instead of a saved menu bar selection", async () => {
+  api.codexProfileQuota.mockImplementation(async (id) => ({ provider: "codex", windows: [{ window: id === "one" ? "weekly" : "monthly", percent: 20 }] }));
+  const workspace: Workspace = { id: "studio", name: "Studio", accent: "#007aff", accountIds: ["one", "two"], claudeAccountIds: [], usage: { ...DEFAULT_WORKSPACE_USAGE, menuBarAccountId: "one", activeAccounts: { codex: "one" } } };
+  const props = { app: DEFAULT_APP_SETTINGS, claudeAccounts: [], googleAccounts: [], busy: false, onSave: vi.fn() };
+  const view = render(<WorkspaceMenuBar {...props} workspace={workspace} accounts={[account("one"), { ...account("two"), active: true }]} />);
+  expect(await screen.findByRole("switch", { name: "Show two Monthly limit" })).toBeInTheDocument();
+  expect(api.codexProfileQuota).not.toHaveBeenCalledWith("one");
+  expect(screen.queryByRole("combobox", { name: "Menu bar account" })).not.toBeInTheDocument();
+  view.rerender(<WorkspaceMenuBar {...props} workspace={workspace} accounts={[{ ...account("one"), active: true }, account("two")]} />);
+  expect(await screen.findByRole("switch", { name: "Show one Weekly limit" })).toBeInTheDocument();
+  expect(screen.queryByRole("switch", { name: "Show two Monthly limit" })).not.toBeInTheDocument();
+  view.rerender(<WorkspaceMenuBar {...props} workspace={workspace} accounts={[account("one"), account("two")]} />);
+  expect(screen.getByText("No active Codex account.")).toBeInTheDocument();
+  expect(screen.queryByRole("switch", { name: /limit/ })).not.toBeInTheDocument();
+  view.rerender(<WorkspaceMenuBar {...props} workspace={workspace} accounts={[account("one"), account("two"), { ...account("outside"), active: true }]} />);
+  expect(screen.getByText("No active Codex account.")).toBeInTheDocument();
+  expect(api.codexProfileQuota).not.toHaveBeenCalledWith("outside");
+});

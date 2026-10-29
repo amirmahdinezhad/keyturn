@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
-import { CliProviders, formatAgo, formatCliTitle, formatCliVersion, formatReset } from "./CliProviders";
+import { CliProviders, formatAgo, formatReset } from "./CliProviders";
 import type { ProviderCliStatus } from "../api";
+
+const { profileQuota } = vi.hoisted(() => ({ profileQuota: vi.fn() }));
+vi.mock("../api", async (original) => ({ ...await original<typeof import("../api")>(), claudeProfileQuota: profileQuota }));
 
 const notify = vi.fn();
 const noop = vi.fn();
@@ -31,6 +34,7 @@ function status(over: Partial<ProviderCliStatus> = {}): ProviderCliStatus {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  profileQuota.mockImplementation(async (id: string) => ({ provider: "claude", windows: [{ window: "weekly", percent: id === "two" ? 63 : 21 }] }));
   cleanup();
 });
 
@@ -41,6 +45,59 @@ describe("CliProviders", () => {
     onShowUsage: noop,
   };
 
+  it("omits the entire other-providers section when none are connected", () => {
+    const { container } = render(<CliProviders statuses={[status({ loggedIn: false })]} sectionLabel="Other providers" {...props} />);
+    expect(container.querySelector(".other-providers")).toBeNull();
+    expect(screen.queryByText(/Other providers/)).not.toBeInTheDocument();
+  });
+
+  it("counts saved Claude accounts without duplicating the active CLI login", () => {
+    const account = { id: "one", name: "Personal", email: null, configDir: "/tmp/test", createdAt: "2026-10-01", active: true, connected: true, subscription: null, loginCommand: "claude auth login", launchCommand: "claude", quota: null };
+    render(<CliProviders statuses={[status()]} claudeAccounts={[account, { ...account, id: "two", name: "Work", active: false }]} sectionLabel="Other providers" {...props} />);
+    expect(screen.getByLabelText("2 Claude accounts")).toHaveTextContent("2");
+    expect(screen.getByRole("article", { name: "Personal Claude account" })).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: "Work Claude account" })).toBeInTheDocument();
+    expect(document.querySelectorAll(".cli-card")).toHaveLength(2);
+  });
+
+  it("keeps Claude expanded and excludes it from the other-provider count", () => {
+    const { container } = render(<CliProviders statuses={[status(), status({ id: "gemini", label: "Gemini" })]} sectionLabel="Other providers" {...props} />);
+    const claude = screen.getByRole("region", { name: "Claude accounts" });
+    const other = container.querySelector(".other-providers")!;
+    expect(other.contains(claude)).toBe(false);
+    expect(other.querySelector("summary")).toHaveTextContent("Other providers 1");
+    expect(within(other as HTMLElement).getByRole("region", { name: "Gemini accounts" })).toBeInTheDocument();
+  });
+
+  it("loads each saved Claude profile's own usage, including inactive profiles and session errors", async () => {
+    const user = userEvent.setup();
+    const account = { id: "one", name: "Personal", email: null, configDir: "/tmp/test", createdAt: "2026-10-01", active: true, connected: true, subscription: null, loginCommand: "claude auth login", launchCommand: "claude", quota: { provider: "claude", windows: [{ window: "weekly", percent: 21 }] } };
+    const accounts = [account, { ...account, id: "two", name: "Work", active: false, quota: { provider: "claude", windows: [{ window: "weekly", percent: 63 }] } }, { ...account, id: "empty", name: "New", active: false, quota: null }];
+    const view = render(<CliProviders statuses={null} claudeAccounts={accounts} sectionLabel="Other providers" showRemaining={false} {...props} />);
+    expect(view.container.querySelector(".other-providers")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Usage limits for Work" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Work");
+    expect(await screen.findByText("63%")).toBeInTheDocument();
+    expect(screen.queryByText("21%")).not.toBeInTheDocument();
+    view.rerender(<CliProviders statuses={null} claudeAccounts={accounts} sectionLabel="Other providers" showRemaining {...props} />);
+    expect(screen.getByRole("dialog")).toHaveTextContent("37%");
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    profileQuota.mockResolvedValue({ provider: "claude", error: "Claude session expired. Sign in again." });
+    await user.click(screen.getByRole("button", { name: "Usage limits for New" }));
+    expect(await screen.findByText(/Claude session expired/)).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("loads live Claude usage when a connected profile has no transcript snapshot", async () => {
+    profileQuota.mockResolvedValue({ provider: "claude", windows: [{ window: "5-hour", percent: 42 }] });
+    const account = { id: "live", name: "Team", email: null, configDir: "/tmp/test", createdAt: "2026-10-01", active: true, connected: true, subscription: null, loginCommand: "claude auth login", launchCommand: "claude", quota: null };
+    render(<CliProviders statuses={[]} claudeAccounts={[account]} sectionLabel="Other providers" showRemaining={false} {...props} />);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Usage limits for Team" }));
+    expect(await screen.findByText("42%")).toBeInTheDocument();
+    expect(profileQuota).toHaveBeenCalledWith("live");
+    expect(screen.queryByText(/No snapshots yet/)).not.toBeInTheDocument();
+  });
+
   it("lists only connected providers plus the floating add button", () => {
     const { container } = render(
       <CliProviders
@@ -48,7 +105,7 @@ describe("CliProviders", () => {
           status(),
           status({
             id: "codex",
-            label: "OpenAI Codex",
+            label: "Codex",
             binary: "codex",
             binaryFound: false,
             binaryPath: null,
@@ -73,7 +130,7 @@ describe("CliProviders", () => {
     expect(titles[0]).not.toContain("Logged in");
     expect(container.querySelector(".cli-card .mini-chip")).toBeNull();
     // The missing CLI is hidden from the list…
-    expect(screen.queryByText("OpenAI Codex")).not.toBeInTheDocument();
+    expect(screen.queryByText("Codex")).not.toBeInTheDocument();
     // …and reachable through the floating plus button instead (icon only).
     expect(
       screen.getByRole("button", { name: "Add account" }),
@@ -88,7 +145,7 @@ describe("CliProviders", () => {
           status(),
           status({
             id: "codex",
-            label: "OpenAI Codex",
+            label: "Codex",
             binary: "codex",
             binaryFound: false,
             binaryPath: null,
@@ -189,7 +246,7 @@ describe("CliProviders", () => {
     expect(screen.queryByText("Logged in via claude.ai")).not.toBeInTheDocument();
   });
 
-  it("shows the CLI version as a quiet pill and never the binary path", () => {
+  it("hides CLI versions and connection dots", () => {
     const { container } = render(
       <CliProviders
         statuses={[status({ version: "codex-cli 0.52.0" })]}
@@ -199,12 +256,12 @@ describe("CliProviders", () => {
       />,
     );
 
-    expect(screen.getByText("CLI v0.52.0")).toBeInTheDocument();
-    expect(screen.getByText("CLI v0.52.0")).toHaveAttribute("title", "codexCli 0.52.0");
+    expect(screen.queryByText("CLI v0.52.0")).not.toBeInTheDocument();
     expect(screen.queryByText("codex-cli 0.52.0")).not.toBeInTheDocument();
     expect(screen.queryByText("codexCli 0.52.0")).not.toBeInTheDocument();
     expect(screen.queryByText("/opt/homebrew/bin/claude")).not.toBeInTheDocument();
-    expect(container.querySelector(".cli-version")).not.toBeNull();
+    expect(container.querySelector(".cli-version")).toBeNull();
+    expect(container.querySelector(".cli-connection i")).toBeNull();
   });
 
   it("shows account identity without internal IDs or credential paths", () => {
@@ -254,11 +311,51 @@ describe("CliProviders", () => {
       status({ id: "opencode", label: "OpenCode", email: null, authMethod: null, connected: ["anthropic", "openai", "opencode-go"] }),
     ]} {...props} />);
     expect(screen.getByText("Max")).toBeInTheDocument();
-    const services = screen.getByLabelText("Connected services");
+    const services = screen.getAllByLabelText("Connected services").find((element) => element.textContent?.includes("OpenCode Go"))!;
     expect(services).toHaveTextContent("Anthropic");
     expect(services).toHaveTextContent("OpenAI");
     expect(services).toHaveTextContent("OpenCode Go");
     expect(screen.getByText("3 services")).toBeInTheDocument();
+  });
+
+  it("places a text-only plan badge below the CLI provider without a price", () => {
+    const { container } = render(<CliProviders statuses={[status({ id: "codex", label: "Codex", authMethod: "API key",
+      subscriptions: [{ id: "chatgpt", service: "ChatGPT", plan: "prolite" }],
+    })]} {...props} />);
+    expect(container.querySelector(".cli-head")).toHaveTextContent("Codex");
+    const footer = within(container.querySelector(".cli-footer") as HTMLElement);
+    expect(footer.getByText("ChatGPT")).toBeInTheDocument();
+    const badge = footer.getByText("Pro");
+    expect(badge).toHaveAttribute("data-tier", "pro");
+    expect(badge.childElementCount).toBe(0);
+    expect(badge).not.toHaveAttribute("aria-label");
+    expect(footer.queryByText(/\$|\/mo/)).not.toBeInTheDocument();
+  });
+
+  it("removes ended accounts and only expired services on multi-service cards", () => {
+    const { container } = render(<CliProviders statuses={[
+      status({ id: "codex", label: "Codex", subscriptions: [{ id: "chatgpt", service: "ChatGPT", plan: "plus", expiresAt: "2000-01-01T00:00:00Z" }] }),
+      status({ id: "opencode", label: "OpenCode", subscriptions: [
+        { id: "opencode-go", service: "OpenCode Go", plan: "go", status: "expired" },
+        { id: "openai", service: "OpenAI", plan: "API" },
+      ] }),
+    ]} {...props} />);
+    expect(container.querySelectorAll(".cli-card")).toHaveLength(1);
+    expect(container.querySelector(".cli-head")).toHaveTextContent("OpenCode");
+    expect(screen.queryByText("OpenCode Go")).not.toBeInTheDocument();
+    expect(screen.getByText("OpenAI")).toBeInTheDocument();
+    expect(container.querySelector(".provider-section-label")).toHaveTextContent("1");
+  });
+
+  it("removes a subscription when it ends while the panel stays open", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-15T00:00:00Z"));
+      render(<CliProviders statuses={[status({ subscriptions: [{ id: "claude", service: "Claude", plan: "pro", expiresAt: "2026-10-15T00:00:01Z" }] })]} {...props} />);
+      expect(screen.queryByText("No connected accounts")).not.toBeInTheDocument();
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByText("No connected accounts")).toBeInTheDocument();
+    } finally { vi.useRealTimers(); }
   });
 });
 
@@ -308,22 +405,13 @@ describe("formatReset", () => {
   });
 });
 
-describe("formatCliTitle", () => {
-  it("camelCases the binary-name prefix for the tooltip", () => {
-    expect(formatCliTitle(null)).toBe("");
-    expect(formatCliTitle("  ")).toBe("");
-    expect(formatCliTitle("codex-cli 0.52.0")).toBe("codexCli 0.52.0");
-    expect(formatCliTitle("claude 2.1.220")).toBe("claude 2.1.220");
-    expect(formatCliTitle("opencode 1.5.3")).toBe("opencode 1.5.3");
-  });
-});
-
-describe("formatCliVersion", () => {
-  it("strips the binary-name prefix from --version output", () => {
-    expect(formatCliVersion(null)).toBe("");
-    expect(formatCliVersion("codex-cli 0.52.0")).toBe("v0.52.0");
-    expect(formatCliVersion("claude 2.1.220")).toBe("v2.1.220");
-    expect(formatCliVersion("opencode 1.5.3")).toBe("v1.5.3");
-    expect(formatCliVersion("2.1.220")).toBe("v2.1.220");
-  });
+it("removes a failed saved Claude account on refresh without resurrecting its ambient login", () => {
+  const account = { id: "one", name: "Personal", email: "dev@example.com", configDir: "/tmp/test", createdAt: "2026-10-01", active: true, connected: true, subscription: null, loginCommand: "", launchCommand: "", quota: { provider: "claude", windows: [{ window: "weekly", percent: 100 }] } };
+  const view = render(<CliProviders statuses={[status()]} claudeAccounts={[account]} sectionLabel="Other providers" notify={notify} onAddAccount={noop} onShowUsage={noop} />);
+  expect(screen.getByRole("article", { name: "Personal Claude account" })).toBeInTheDocument();
+  view.rerender(<CliProviders statuses={[status()]} claudeAccounts={[{ ...account, connected: false, quota: { provider: "claude", error: "Session expired" } }]} sectionLabel="Other providers" notify={notify} onAddAccount={noop} onShowUsage={noop} />);
+  expect(screen.queryByRole("article", { name: "Personal Claude account" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("article", { name: "Claude account" })).not.toBeInTheDocument();
+  view.rerender(<CliProviders statuses={[status()]} claudeAccounts={[account]} sectionLabel="Other providers" notify={notify} onAddAccount={noop} onShowUsage={noop} />);
+  expect(screen.getByRole("article", { name: "Personal Claude account" })).toBeInTheDocument();
 });

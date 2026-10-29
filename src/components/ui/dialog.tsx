@@ -7,14 +7,15 @@ const DialogClose = DialogPrimitive.Close;
 
 function DialogContent({
   className,
+  overlayClassName,
   children,
   ...props
-}: ComponentProps<typeof DialogPrimitive.Content>) {
+}: ComponentProps<typeof DialogPrimitive.Content> & { overlayClassName?: string }) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
         data-slot="dialog-overlay"
-        className="ak-backdrop"
+        className={cn("ak-backdrop", overlayClassName)}
       />
       <DialogPrimitive.Content
         data-slot="dialog-content"

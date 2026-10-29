@@ -11,6 +11,12 @@ use Keyturn's existing Figtree, appearance and accent tokens in `src/index.css`.
 Only the APIs used by Keyturn are included. Dialogs restore focus to the button
 that opened them, even though they open from app state rather than a DialogTrigger.
 
+Select, Checkbox, RadioGroup and Tooltip also use Radix primitives and Keyturn's
+tokens. Visible controls and popovers render inside the webview; no system select
+menus, form controls, title tooltips or file dialogs are used. `Button` renders its
+`title` through Tooltip. Text fields explicitly reset platform appearance. File
+imports use an in-app path form, with absolute paths and `~/` supported by Rust.
+
 Refresh cadence uses the same segmented control as Theme, with 30, 60 and 120
 second presets. A previously saved custom cadence is included as a selected
 option. Radix provides keyboard navigation and radio semantics; changes save

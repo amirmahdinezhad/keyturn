@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        version = "0.1.0";
+        version = "1.0.0";
         src = self;
       in
       {
@@ -67,7 +67,7 @@
 
           meta = with pkgs.lib; {
             description = "Menubar API-key manager and quota monitor for AI coding CLIs";
-            homepage = "https://github.com/7SkyLab/keyturn";
+            homepage = "https://github.com/amirmahdinezhad/keyturn";
             license = licenses.mit;
             platforms = platforms.darwin;
             mainProgram = "keyturn";

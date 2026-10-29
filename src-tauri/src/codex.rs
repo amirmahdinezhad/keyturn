@@ -1,9 +1,8 @@
 //! Codex CLI credential status (read-only).
 //!
 //! Codex keeps its credentials in `$CODEX_HOME/auth.json` (default
-//! `~/.codex/auth.json`). Keyturn never writes this file and never refreshes
-//! tokens — the user owns auth via `codex login` in their own terminal.
-//! We only read the file to enrich the CLI status display.
+//! `~/.codex/auth.json`). This module only reads the file to enrich status.
+//! The CLI owns login/refresh; explicit profile activation is in `profiles.rs`.
 //!
 //! The authoritative login check is `codex login status` (see `cli.rs`).
 
@@ -21,6 +20,7 @@ pub struct CodexStatus {
     pub has_tokens: bool,
     pub email: Option<String>,
     pub plan: Option<String>,
+    pub subscription: Option<crate::subscriptions::Subscription>,
     pub account_id: Option<String>,
     /// Unix seconds from the access token's `exp` claim, when parseable.
     pub expires_at: Option<i64>,
@@ -41,6 +41,27 @@ fn jwt_payload(jwt: &str) -> Option<Value> {
         .decode(payload)
         .ok()?;
     serde_json::from_slice(&bytes).ok()
+}
+
+/// Read display-only profile metadata from a local login; never use it as identity.
+pub(crate) fn profile_display_name(auth: &Value) -> Option<String> {
+    let token = auth.get("tokens")?.get("id_token")?.as_str()?;
+    let claims = jwt_payload(token)?;
+    let usable = |value: Option<&str>| value.map(str::trim).filter(|name| !name.is_empty() && name.chars().count() <= 128 && !name.chars().any(char::is_control)).map(str::to_owned);
+    usable(claim(&claims, &["name"]))
+        .or_else(|| usable(claim(&claims, &["https://api.openai.com/profile", "name"])))
+}
+
+/// Imported accounts need no manual label; retain a readable fallback for older logins.
+pub(crate) fn imported_account_label(auth: &Value) -> String {
+    profile_display_name(auth)
+        .or_else(|| auth.get("tokens")?.get("id_token")?.as_str().and_then(jwt_payload).and_then(|claims| profile_email(&claims)))
+        .unwrap_or_else(|| "ChatGPT account".into()).chars().take(64).collect()
+}
+
+fn profile_email(claims: &Value) -> Option<String> {
+    claim(claims, &["email"]).or_else(|| claim(claims, &["https://api.openai.com/profile", "email"]))
+        .map(str::trim).filter(|email| !email.is_empty() && !email.chars().any(char::is_control)).map(str::to_owned)
 }
 
 fn id_token_info(raw: &str) -> (Option<String>, Option<String>, Option<String>) {
@@ -90,6 +111,7 @@ pub fn status() -> CodexStatus {    let file = paths::codex_auth_file();
         }),
         email,
         plan,
+        subscription: id_token.and_then(jwt_payload).map(|claims| crate::subscriptions::chatgpt(&claims)),
         account_id: tokens
             .and_then(|t| t.get("account_id"))
             .and_then(|v| v.as_str())
@@ -109,9 +131,11 @@ pub fn status() -> CodexStatus {    let file = paths::codex_auth_file();
 /// Returns `None` when nothing usable is stored. Never writes.
 pub fn oauth_access() -> Option<(String, Option<String>, Option<i64>)> {
     let file = paths::codex_auth_file();
-    let Some(serde_json::Value::Object(root)) = paths::read_json(&file) else {
-        return None;
-    };
+    oauth_access_from(&paths::read_json(&file)?)
+}
+
+/// Parse a saved account without replacing the active CLI login.
+pub fn oauth_access_from(root: &Value) -> Option<(String, Option<String>, Option<i64>)> {
     let tokens = root.get("tokens")?;
     let access = tokens
         .get("access_token")
@@ -148,6 +172,26 @@ mod tests {
                 }
             }))
         )
+    }
+
+    #[test]
+    fn automatic_import_labels_use_name_then_email_then_provider() {
+        let auth = |claims: Value| json!({"tokens":{"id_token":format!("header.{}.sig", b64(&claims))}});
+        assert_eq!(imported_account_label(&auth(json!({"name":"Emma Brooks","email":"other@example.com"}))), "Emma Brooks");
+        assert_eq!(imported_account_label(&auth(json!({"email":"other@example.com"}))), "other@example.com");
+        assert_eq!(imported_account_label(&auth(json!({}))), "ChatGPT account");
+        assert_eq!(imported_account_label(&auth(json!({"name":"é".repeat(100)}))).chars().count(), 64);
+    }
+
+    #[test]
+    fn display_names_use_profile_claims_with_safe_fallbacks() {
+        let auth = |claims: Value| json!({"tokens":{"id_token":format!("header.{}.sig", b64(&claims))}});
+        assert_eq!(profile_display_name(&auth(json!({"name":" Emma Brooks "}))).as_deref(), Some("Emma Brooks"));
+        assert_eq!(profile_display_name(&auth(json!({"https://api.openai.com/profile":{"name":"Emma Brooks"}}))).as_deref(), Some("Emma Brooks"));
+        assert!(profile_display_name(&auth(json!({"email":"fixture@example.com"}))).is_none());
+        assert!(profile_display_name(&auth(json!({"name":"Emma\nBrooks"}))).is_none());
+        assert!(profile_display_name(&auth(json!({"name":"   "}))).is_none());
+        assert!(profile_display_name(&json!({"tokens":{"id_token":"broken"}})).is_none());
     }
 
     #[test]

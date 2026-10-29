@@ -1,23 +1,22 @@
-// Display prefs — frontend-only, persisted in localStorage.
-// Backend owns refresh cadence + usage mode; everything here is purely
-// presentational so it never touches the IPC contract.
+// Display prefs are persisted in localStorage. App mirrors the selected
+// accent to the native menu bar; backend settings own refresh and usage mode.
 
 /** Appearance selection, with system mode resolved against the OS. */
 export type ThemeMode = "dark" | "light" | "system";
 
 /** Frontend preferences stored independently of backend settings. */
 export interface DisplayPrefs {
-  /** Show the CLI version line under each provider. */
+  /** Legacy stored flag; provider cards no longer display CLI versions. */
   showDetails: boolean;
   /** Tighter rows for small panels. */
   compactRows: boolean;
   /** Re-read state + CLI status when the panel regains focus. */
   refreshOnFocus: boolean;
-  /** Run an update check automatically when the Updates tab opens. */
+  /** Opt-in daily update checks and downloads, including while Settings is closed. */
   checkUpdatesOnLaunch: boolean;
   /** Panel color scheme. `system` follows the OS. */
   theme: ThemeMode;
-  /** Accent hex (e.g. #007aff). Tints primary actions, links, bars. */
+  /** Compatibility fallback; workspace accents are applied without storing them here. */
   accent: string;
 }
 
@@ -27,7 +26,14 @@ export const DISPLAY_PREFS_KEY = "keyturn.displayPrefs";
 /** Default accent used when a saved color is absent or invalid. */
 export const DEFAULT_ACCENT = "#007aff";
 
-/** Curated accents — Apple-native blue default, muted CLI/ember/orchid alternates. */
+/** Scope identity color without changing the workspace's root appearance. */
+export function accentStyle(accent: string): Record<string, string> {
+  const color = /^#[\da-f]{6}$/i.test(accent) ? accent : DEFAULT_ACCENT;
+  const action = readableActionColor(color);
+  return { "--accent": color, "--accent-hover": mix(color, [255, 255, 255], 0.18), "--accent-bg": `${color}29`, "--accent-action": action, "--accent-action-hover": readableActionColor(mix(action, [255, 255, 255], 0.08)) };
+}
+
+/** Workspace and account identity colors. */
 export const ACCENT_PRESETS: Array<{ name: string; value: string; hint: string }> = [
   { name: "Signal blue", value: "#007aff", hint: "Default" },
   { name: "Moss", value: "#2f9e6e", hint: "Terminal" },
@@ -75,10 +81,7 @@ export function loadDisplayPrefs(): DisplayPrefs {
           ? parsed.checkUpdatesOnLaunch
           : DEFAULT_DISPLAY_PREFS.checkUpdatesOnLaunch,
       theme: isThemeMode(parsed.theme) ? parsed.theme : DEFAULT_DISPLAY_PREFS.theme,
-      accent:
-        typeof parsed.accent === "string" && isHexColor(parsed.accent)
-          ? normalizeHex(parsed.accent)
-          : DEFAULT_DISPLAY_PREFS.accent,
+      accent: DEFAULT_ACCENT,
     };
   } catch {
     return { ...DEFAULT_DISPLAY_PREFS };
@@ -88,7 +91,7 @@ export function loadDisplayPrefs(): DisplayPrefs {
 /** Persist preferences when storage is available; storage errors are ignored. */
 export function saveDisplayPrefs(prefs: DisplayPrefs): void {
   try {
-    localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify(prefs));
+    localStorage.setItem(DISPLAY_PREFS_KEY, JSON.stringify({ ...prefs, accent: DEFAULT_ACCENT }));
   } catch {
     // Private mode etc: prefs just won't persist.
   }
@@ -106,6 +109,8 @@ export function resetDisplayPrefs(): DisplayPrefs {
     document.documentElement.style.removeProperty("--accent");
     document.documentElement.style.removeProperty("--accent-hover");
     document.documentElement.style.removeProperty("--accent-bg");
+    document.documentElement.style.removeProperty("--accent-action");
+    document.documentElement.style.removeProperty("--accent-action-hover");
   } catch {
     // Non-DOM (tests): nothing to clean up.
   }
@@ -114,10 +119,6 @@ export function resetDisplayPrefs(): DisplayPrefs {
 
 function isThemeMode(v: unknown): v is ThemeMode {
   return v === "dark" || v === "light" || v === "system";
-}
-
-function isHexColor(v: string): boolean {
-  return /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v.trim());
 }
 
 function normalizeHex(v: string): string {
@@ -146,6 +147,19 @@ function mix(hex: string, target: [number, number, number], amount: number): str
   return `#${m(r, target[0])}${m(g, target[1])}${m(b, target[2])}`;
 }
 
+/** Retain the chosen hue while keeping white action labels readable (4.5:1). */
+function readableActionColor(hex: string): string {
+  const luminance = (color: string) => hexToRgb(color).map((value) => {
+    const channel = value / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  }).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index], 0);
+  for (let shade = 0; shade <= 100; shade++) {
+    const candidate = mix(hex, [0, 0, 0], shade / 100);
+    if (1.05 / (luminance(candidate) + 0.05) >= 4.5) return candidate;
+  }
+  return "#000000";
+}
+
 /** Resolve `system` against the OS; `dark`/`light` pass through. */
 export function resolveTheme(mode: ThemeMode): "dark" | "light" {
   if (mode !== "system") return mode;
@@ -168,13 +182,15 @@ export function applyDisplayPrefs(prefs: Pick<DisplayPrefs, "theme" | "accent">)
     const resolved = resolveTheme(prefs.theme);
     root.setAttribute("data-theme", resolved);
     root.style.colorScheme = resolved;
-    const accent = isHexColor(prefs.accent)
-      ? normalizeHex(prefs.accent)
-      : DEFAULT_ACCENT;
+    const normalized = normalizeHex(prefs.accent);
+    const accent = /^#[0-9a-f]{6}$/.test(normalized) ? normalized : DEFAULT_ACCENT;
     const [r, g, b] = hexToRgb(accent);
     root.style.setProperty("--accent", accent);
     root.style.setProperty("--accent-hover", mix(accent, [255, 255, 255], 0.18));
     root.style.setProperty("--accent-bg", `rgba(${r}, ${g}, ${b}, 0.16)`);
+    const colors = accentStyle(accent);
+    root.style.setProperty("--accent-action", colors["--accent-action"]);
+    root.style.setProperty("--accent-action-hover", colors["--accent-action-hover"]);
   } catch {
     // Non-DOM (tests): no-op.
   }

@@ -1,5 +1,30 @@
 # Keyturn — agent rules
 
+## Release workflow (every feature and bug fix)
+
+- Read `docs/RELEASING.md` when preparing, building or publishing a release.
+- Implement the change and complete the checklist below in the local native dev
+  panel. Prepare the next SemVer version and user-facing English/Persian notes
+  in `docs/releases/<version>.md`; keep the app versions synchronized.
+- Present the tested changes, proposed version and release notes for the user's
+  approval. A successful local test is not permission to publish. Wait for
+  explicit approval for that particular release before pushing its tag or
+  publishing it. An explicit request to publish a named version is approval for
+  that version only, not for later releases.
+- After approval, push the reviewed commit and `v<version>` tag to
+  `amirmahdinezhad/keyturn`. GitHub Actions builds a **draft**, never a public
+  release automatically. Verify the DMG, updater archive, signature, both macOS
+  architectures, checksums, release notes and `latest.json` before publishing
+  with `pnpm run release:publish --approved`.
+- Confirm the public feed and assets work without GitHub authentication and
+  check Settings → Updates in the native panel. Report the release URL and
+  checklist results. Installed users must be able to read the notes, download,
+  then explicitly choose Install & relaunch.
+- Reuse the existing updater signing key; keep its private half outside this
+  repository and in GitHub Actions secrets. Release artifacts must come from
+  the exact tagged commit. Preserve uncommitted work and keep local account
+  data, credentials, screenshots and QA recordings out of public commits.
+
 ## Dev stack (do not change ports)
 
 - Frontend: `vite --port 5174 --strictPort` → http://localhost:5174/

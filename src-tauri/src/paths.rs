@@ -26,7 +26,7 @@ pub fn store_file() -> PathBuf {
     opencode_user_data().join("agent-rtl.keys")
 }
 
-/// App-wide settings (refresh cadence and quota wording).
+/// App-wide settings (refresh cadence, quota wording and menu-bar display).
 pub fn settings_file() -> PathBuf {
     opencode_user_data().join("agent-rtl.settings.json")
 }

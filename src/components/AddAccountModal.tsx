@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "./ui/button";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { ProviderCliStatus } from "../api";
@@ -8,15 +8,21 @@ import { AppModal } from "./AppModal";
 import { CopyRow } from "./CliProviders";
 import { PROVIDER_SETUP } from "../providerSetup";
 import type { ToastKind } from "./Toast";
+import { SetupSteps } from "./SetupSteps";
 
 interface AddAccountModalProps {
   open: boolean;
-  /** Providers that are not connected (missing binary or not logged in). */
+  /** Supported providers, including connected providers that accept more accounts. */
   candidates: ProviderCliStatus[];
   onClose: () => void;
   /** Re-read CLI status; resolves with the fresh list. */
   onRefresh: () => Promise<ProviderCliStatus[]>;
+  onConnected?: (providerId: string) => Promise<void>;
   notify: (message: string, kind?: ToastKind) => void;
+  /** Named accounts stay reachable even when Codex is already connected. */
+  onCodexProfiles?: () => void;
+  onClaudeProfiles?: () => void;
+  title?: string;
 }
 
 type Step = "pick" | "install" | "login" | "done";
@@ -34,7 +40,11 @@ export function AddAccountModal({
   candidates,
   onClose,
   onRefresh,
+  onConnected,
   notify,
+  onCodexProfiles,
+  onClaudeProfiles,
+  title = "Add account",
 }: AddAccountModalProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("pick");
@@ -42,9 +52,11 @@ export function AddAccountModal({
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [includeInstall, setIncludeInstall] = useState(false);
+  const checkGeneration = useRef(0);
 
   // Fresh open resets the wizard.
   useEffect(() => {
+    checkGeneration.current++;
     if (open) {
       setSelectedId(null);
       setStep("pick");
@@ -53,9 +65,11 @@ export function AddAccountModal({
       setError(null);
       setIncludeInstall(false);
     }
+    return () => { checkGeneration.current++; };
   }, [open]);
 
   const close = () => {
+    checkGeneration.current++;
     onClose();
   };
 
@@ -83,6 +97,10 @@ export function AddAccountModal({
   );
 
   const pick = (id: string) => {
+    if (id === "codex" && onCodexProfiles) { onCodexProfiles(); return; }
+    if (id === "claude" && onClaudeProfiles) { onClaudeProfiles(); return; }
+    checkGeneration.current++;
+    setChecking(false);
     const c = candidates.find((x) => x.id === id) ?? null;
     setSelectedId(id);
     setLive(c);
@@ -92,16 +110,20 @@ export function AddAccountModal({
   };
 
   const backToPick = () => {
+    checkGeneration.current++;
+    setChecking(false);
     setStep("pick");
     setError(null);
   };
 
   const checkInstall = () => {
     if (!current) return;
+    const ticket = ++checkGeneration.current;
     setChecking(true);
     setError(null);
     void onRefresh()
       .then((fresh) => {
+        if (ticket !== checkGeneration.current) return;
         const now = fresh.find((c) => c.id === current.id);
         if (now) setLive(now);
         if (now?.binaryFound) {
@@ -112,19 +134,23 @@ export function AddAccountModal({
           );
         }
       })
-      .catch(() => setError("Couldn't re-check — try again."))
-      .finally(() => setChecking(false));
+      .catch(() => { if (ticket === checkGeneration.current) setError("Couldn't re-check — try again."); })
+      .finally(() => { if (ticket === checkGeneration.current) setChecking(false); });
   };
 
   const checkLogin = () => {
     if (!current) return;
+    const ticket = ++checkGeneration.current;
     setChecking(true);
     setError(null);
     void onRefresh()
-      .then((fresh) => {
+      .then(async (fresh) => {
+        if (ticket !== checkGeneration.current) return;
         const now = fresh.find((c) => c.id === current.id);
         if (now) setLive(now);
         if (now?.binaryFound && now.loggedIn === true) {
+          await onConnected?.(now.id);
+          if (ticket !== checkGeneration.current) return;
           setStep("done");
           notify(`${now.label} connected`, "ok");
         } else if (now && !now.binaryFound) {
@@ -137,42 +163,32 @@ export function AddAccountModal({
           );
         }
       })
-      .catch(() => setError("Couldn't re-check — try again."))
-      .finally(() => setChecking(false));
+      .catch(() => { if (ticket === checkGeneration.current) setError("Couldn't re-check — try again."); })
+      .finally(() => { if (ticket === checkGeneration.current) setChecking(false); });
   };
 
   return (
     <AppModal
       open={open}
       onClose={close}
-      title="Add account"
+      title={title}
       cardClass="setup-card"
-      onBack={step !== "pick" ? backToPick : undefined}
+      onBack={step !== "pick" && step !== "done" ? backToPick : undefined}
       backLabel="All providers"
     >
-      {candidates.length === 0 && step === "pick" ? (
+      {step === "pick" ? <p className="provider-pick-intro">Choose a provider to add an account.</p> : null}
+      {step === "pick" && onCodexProfiles && !candidates.some((c) => c.id === "codex") ? (
+        <Button className="row profile-add-entry" onClick={onCodexProfiles}>
+          <ProviderLogo provider="codex" />
+          <span className="row-main"><span className="row-title">Codex</span><span className="row-sub">Import a saved ChatGPT login</span></span>
+          <AddIcon size={20} />
+        </Button>
+      ) : null}
+      {candidates.length === 0 && step === "pick" && !onCodexProfiles ? (
         <p className="m-empty">Everything is connected.</p>
       ) : (
         <>
-          {step !== "pick" ? (
-            <ol className="wizard-steps" aria-label="Setup progress">
-              {steps.map((s, i) => (
-                <li
-                  key={s.id}
-                  className={`wizard-step${i < stepIndex ? " is-done" : ""}${i === stepIndex ? " is-now" : ""}`}
-                  aria-current={i === stepIndex ? "step" : undefined}
-                >
-                  <span className="wizard-dot" aria-hidden="true">
-                    {i < stepIndex ? "✓" : `${i + 1}`}
-                  </span>
-                  <span className="wizard-label">{s.label}</span>
-                  {i < steps.length - 1 ? (
-                    <span className="wizard-line" aria-hidden="true" />
-                  ) : null}
-                </li>
-              ))}
-            </ol>
-          ) : null}
+          {step !== "pick" ? <SetupSteps labels={steps.map((s) => s.label)} current={stepIndex} label="Setup progress" /> : null}
 
           {step === "pick" ? (
             <div className="stack" role="group" aria-label="Choose a provider">
@@ -187,7 +203,9 @@ export function AddAccountModal({
                   <span className="row-main">
                     <span className="row-title">{c.label}</span>
                     <span className="row-sub">
-                      {!c.binaryFound ? "Not installed" : "Not logged in"}
+                      {c.id === "codex" && onCodexProfiles ? "Import a saved ChatGPT login"
+                        : c.id === "claude" && onClaudeProfiles ? "Sign in with a separate Claude profile"
+                        : !c.binaryFound ? "Not installed" : c.loggedIn ? "Manage provider sign-in" : "Not logged in"}
                     </span>
                   </span>
                   <span className="row-glyph">

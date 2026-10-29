@@ -1,14 +1,14 @@
-//! CLI-only provider status (T3-style, read-only).
+//! CLI-only provider status and confirmed expired OpenCode connection cleanup.
 //!
-//! Keyturn does NOT authenticate. Each provider owns its CLI and its own
+//! Each provider owns its CLI and its own
 //! credential storage; we only:
 //!   1. check the binary exists on `PATH` (plus common install dirs),
 //!   2. run the CLI's own status command (never a login/write command),
-//!   3. read the CLI's auth file read-only to enrich the display.
+//!   3. read the CLI's auth file to enrich the display,
+//!   4. remove an OpenCode service entry only after confirmed billing expiry.
 //!
-//! No OAuth, no webview, no keychain writes, no auth.json patching here.
-//! Anything that would change credentials must be run by the user in their
-//! own terminal (we only show the exact command to copy).
+//! No OAuth, webview or keychain writes in this module.
+//! Explicit Codex profile activation lives separately in `profiles.rs`.
 //!
 //! Covered providers (user scope):
 //! | id | CLI binary | login (user runs) | status (we run) |
@@ -63,6 +63,8 @@ pub struct ProviderCliStatus {
     /// For OpenCode: provider ids present in auth.json (anthropic, openai, …).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub connected: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subscriptions: Vec<crate::subscriptions::Subscription>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -84,7 +86,7 @@ const SPECS: &[CliSpec] = &[
     },
     CliSpec {
         id: "codex",
-        label: "OpenAI Codex",
+        label: "Codex",
         binary: "codex",
         install_url: "https://developers.openai.com/codex/cli",
         login_cmd: "codex login",
@@ -109,7 +111,7 @@ const SPECS: &[CliSpec] = &[
 
 /// `PATH` lookup plus the install dirs CLIs commonly land in when the GUI
 /// environment has a thinner `PATH` than the user's shell.
-fn which_binary(name: &str) -> Option<PathBuf> {
+pub(crate) fn which_binary(name: &str) -> Option<PathBuf> {
     let path_var = std::env::var_os("PATH").unwrap_or_default();
     let mut dirs: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
     for extra in [
@@ -156,7 +158,16 @@ struct RunOut {
 /// it in `spawn_blocking`. Timeouts are enforced by killing after N secs via
 /// a helper thread (std has no `Command::timeout`).
 fn run_status(binary: &Path, args: &[&str], timeout: Duration) -> Option<RunOut> {
-    let mut child = Command::new(binary)
+    run_status_env(binary,args,timeout,None)
+}
+
+fn run_status_env(binary: &Path, args: &[&str], timeout: Duration, config: Option<&Path>) -> Option<RunOut> {
+    let mut command = Command::new(binary);
+    if let Some(config) = config {
+        command.env("CLAUDE_CONFIG_DIR", config).env("CLAUDE_SECURESTORAGE_CONFIG_DIR", config);
+        for (key,_) in std::env::vars().filter(|(key,_)| key.starts_with("ANTHROPIC_") || key.starts_with("CLAUDE_CODE_USE_") || key == "CLAUDE_CODE_OAUTH_TOKEN") { command.env_remove(key); }
+    }
+    let mut child = command
         .args(args)
         .env("NO_COLOR", "1")
         .env("CLICOLOR", "0")
@@ -189,6 +200,14 @@ fn run_status(binary: &Path, args: &[&str], timeout: Duration) -> Option<RunOut>
     }
 }
 
+/// Read one Claude-owned Keychain entry without logging or changing credentials.
+#[cfg(target_os = "macos")]
+pub(crate) fn claude_keychain_credentials(service: &str) -> Option<String> {
+    let result = run_status(Path::new("/usr/bin/security"),
+        &["find-generic-password", "-s", service, "-w"], Duration::from_secs(3))?;
+    result.success.then_some(result.stdout)
+}
+
 fn binary_version(binary: &Path) -> Option<String> {
     // `x --version` prints fast and never writes credentials.
     let out = run_status(binary, &["--version"], Duration::from_secs(8))?;
@@ -217,10 +236,14 @@ fn read_json_file(path: &Path) -> Option<serde_json::Value> {
 /// `claude auth status --json` → `{"loggedIn":true,"authMethod":"claude.ai",…}`.
 /// Trust the `loggedIn` field over the exit code (2.x may exit non-zero on
 /// transient refresh notices while still logged in).
-fn probe_claude(binary: &Path) -> (Option<bool>, Option<String>, Option<String>, Option<String>) {
-    let Some(out) = run_status(binary, &["auth", "status", "--json"], Duration::from_secs(10))
+fn probe_claude(binary: &Path) -> (Option<bool>, Option<String>, Option<String>, Option<String>, Option<crate::subscriptions::Subscription>) {
+    probe_claude_at(binary,None)
+}
+
+pub(crate) fn probe_claude_at(binary: &Path, config: Option<&Path>) -> (Option<bool>, Option<String>, Option<String>, Option<String>, Option<crate::subscriptions::Subscription>) {
+    let Some(out) = run_status_env(binary, &["auth", "status", "--json"], Duration::from_secs(10),config)
     else {
-        return (None, None, None, None);
+        return (None, None, None, None, None);
     };
     // stdout may contain the JSON even on non-zero exit; parse regardless.
     let text = out.stdout;
@@ -228,7 +251,7 @@ fn probe_claude(binary: &Path) -> (Option<bool>, Option<String>, Option<String>,
     let json_text = &text[start..];
     let value: serde_json::Value = match serde_json::from_str(json_text) {
         Ok(v) => v,
-        Err(_) => return (Some(out.success), None, None, Some(text)),
+        Err(_) => return (Some(out.success), None, None, Some(text), None),
     };
     let logged_in = value
         .get("loggedIn")
@@ -252,7 +275,9 @@ fn probe_claude(binary: &Path) -> (Option<bool>, Option<String>, Option<String>,
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
         });
-    (Some(logged_in), method, email, account)
+    let subscription = (method.as_deref() == Some("claude.ai"))
+        .then(|| crate::subscriptions::claude(&value));
+    (Some(logged_in), method, email, account, subscription)
 }
 
 /// `codex login status` exits 0 when credentials exist. Stdout is
@@ -336,6 +361,41 @@ fn opencode_auth_keys() -> Vec<String> {
         .collect();
     ids.sort();
     ids
+}
+
+/// Delete only expired entries whose credentials still match the billing probe.
+/// Rereading under the lock preserves other services and newly replaced logins.
+fn prune_expired_opencode(
+    file: &Path,
+    observed: &serde_json::Value,
+    subscriptions: &[crate::subscriptions::Subscription],
+) -> Result<Vec<String>, String> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _guard = LOCK.lock().map_err(|_| "OpenCode connection storage is busy.")?;
+    if !subscriptions.iter().any(|subscription| subscription.is_expired()) {
+        return Ok(Vec::new());
+    }
+    let Some(mut current) = read_json_file(file) else {
+        return Err("Cannot read OpenCode connections for expired subscription cleanup.".into());
+    };
+    let map = current.as_object_mut().ok_or("Invalid OpenCode connection storage.")?;
+    let mut removed = Vec::new();
+    for subscription in subscriptions.iter().filter(|subscription| subscription.is_expired()) {
+        let id = &subscription.id;
+        if observed.get(id).is_some() && map.get(id) == observed.get(id) {
+            map.remove(id);
+            removed.push(id.clone());
+        }
+    }
+    if !removed.is_empty() {
+        crate::profiles::write_private(file, &current)?;
+        if removed.iter().any(|id| id == "opencode-go") {
+            if let Some(key) = observed["opencode-go"]["key"].as_str() {
+                crate::subscriptions::forget_opencode_go(key);
+            }
+        }
+    }
+    Ok(removed)
 }
 
 /// Parse provider rows, never headings, counts, auth types or file paths.
@@ -432,6 +492,7 @@ fn gemini_oauth_file() -> PathBuf {
 // ── aggregate ───────────────────────────────────────────────────────────────
 
 fn status_for(spec: &CliSpec) -> ProviderCliStatus {
+    let mut subscriptions = Vec::new();
     let found = which_binary(spec.binary);
     let (binary_path, version) = match &found {
         Some(p) => (
@@ -443,10 +504,11 @@ fn status_for(spec: &CliSpec) -> ProviderCliStatus {
 
     let (logged_in, auth_method, email, account, detail, connected, auth_file) = match spec.id {
         "claude" => {
-            let (logged_in, method, email, account) = found
+            let (logged_in, method, email, account, subscription) = found
                 .as_deref()
                 .map(probe_claude)
-                .unwrap_or((None, None, None, None));
+                .unwrap_or((None, None, None, None, None));
+            subscriptions.extend(subscription);
             let detail = account.clone();
             let auth_file = claude_auth_file_display();
             (logged_in, method, email, account, detail, Vec::new(), auth_file)
@@ -459,6 +521,9 @@ fn status_for(spec: &CliSpec) -> ProviderCliStatus {
             // Enrich a logged-in row with the account the CLI cached.
             let (email, account) = if logged_in == Some(true) {
                 let st = crate::codex::status();
+                if method.as_deref() == Some("ChatGPT") {
+                    subscriptions.extend(st.subscription);
+                }
                 (st.email, st.plan.or(st.account_id))
             } else {
                 (None, None)
@@ -475,11 +540,45 @@ fn status_for(spec: &CliSpec) -> ProviderCliStatus {
             )
         }
         "opencode" => {
-            let (logged_in, connected, detail) = found
+            let (mut logged_in, mut connected, mut detail) = found
                 .as_deref()
                 .map(probe_opencode)
                 .unwrap_or((None, Vec::new(), None));
             let file = paths::open_code_auth_file();
+            let raw = read_json_file(&file);
+            for id in &connected {
+                let subscription = if id == "opencode-go" {
+                    let key = raw.as_ref().and_then(|value| value.get(id))
+                        .and_then(|entry| entry.get("key")).and_then(|key| key.as_str())
+                        .filter(|key| !key.is_empty());
+                    key.map(crate::subscriptions::opencode_go)
+                } else { None };
+                subscriptions.push(subscription.unwrap_or_else(|| crate::subscriptions::Subscription {
+                    id: id.clone(), service: match id.as_str() {
+                        "opencode" => "OpenCode Zen".into(), "opencode-go" => "OpenCode Go".into(),
+                        "anthropic" => "Anthropic".into(), "openai" => "OpenAI".into(),
+                        "google" => "Google".into(), _ => id.clone(),
+                    },
+                    plan: Some(match id.as_str() { "opencode-go" => "Subscription", "opencode" => "Pay as you go", _ => "API" }.into()),
+                    expires_at: None, status: None, monthly_price_usd: None,
+                }));
+            }
+            if let Some(raw) = raw.as_ref() {
+                match prune_expired_opencode(&file, raw, &subscriptions) {
+                    Ok(removed) if !removed.is_empty() => {
+                        connected.retain(|id| !removed.contains(id));
+                        subscriptions.retain(|subscription| !removed.contains(&subscription.id));
+                        logged_in = Some(!connected.is_empty());
+                        detail = Some(if connected.is_empty() {
+                            "Not logged in".into()
+                        } else {
+                            format!("{} connected", connected.join(", "))
+                        });
+                    }
+                    Err(error) => eprintln!("[keyturn] Expired OpenCode connection cleanup failed: {error}"),
+                    _ => {}
+                }
+            }
             (
                 logged_in,
                 None,
@@ -524,6 +623,7 @@ fn status_for(spec: &CliSpec) -> ProviderCliStatus {
         install_url: spec.install_url.to_string(),
         auth_file,
         connected,
+        subscriptions,
     }
 }
 
@@ -539,7 +639,7 @@ fn claude_auth_file_display() -> Option<String> {
     ))
 }
 
-/// All four providers, in UI order. Never writes anything.
+/// All four providers, in UI order; prunes confirmed expired OpenCode services.
 pub fn all_status() -> Vec<ProviderCliStatus> {
     SPECS.iter().map(status_for).collect()
 }
@@ -623,6 +723,71 @@ mod tests {
         assert!(ids.contains(&"anthropic".to_string()));
         assert!(!ids.contains(&"$schema".to_string()));
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn go_subscription(status: &str, expires_at: Option<&str>) -> crate::subscriptions::Subscription {
+        crate::subscriptions::Subscription {
+            id: "opencode-go".into(), service: "OpenCode Go".into(), plan: None,
+            status: Some(status.into()), expires_at: expires_at.map(str::to_owned),
+            monthly_price_usd: None,
+        }
+    }
+
+    #[test]
+    fn expired_opencode_connection_is_deleted_from_disk_without_affecting_other_services() {
+        let dir = std::env::temp_dir().join(format!("keyturn-expired-{}", uuid::Uuid::new_v4()));
+        let file = dir.join("auth.json");
+        let observed = serde_json::json!({
+            "opencode-go": {"type":"api", "key":"ended-key"},
+            "openai": {"type":"oauth", "refresh":"keep"}, "$schema":"keep"
+        });
+        crate::profiles::write_private(&file, &observed).unwrap();
+        let ended = go_subscription("expired", None);
+        assert_eq!(prune_expired_opencode(&file, &observed, &[ended.clone()]).unwrap(), ["opencode-go"]);
+        let saved = read_json_file(&file).unwrap();
+        assert!(saved.get("opencode-go").is_none());
+        assert_eq!(saved["openai"], observed["openai"]);
+        assert_eq!(saved["$schema"], observed["$schema"]);
+        assert!(prune_expired_opencode(&file, &observed, &[ended]).unwrap().is_empty());
+        #[cfg(unix)] {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn uncertain_active_and_replaced_opencode_credentials_are_never_deleted() {
+        let dir = std::env::temp_dir().join(format!("keyturn-retained-{}", uuid::Uuid::new_v4()));
+        let file = dir.join("auth.json");
+        let observed = serde_json::json!({"opencode-go":{"type":"api","key":"old-key"}});
+        crate::profiles::write_private(&file, &observed).unwrap();
+        let before = std::fs::read(&file).unwrap();
+        for subscription in [go_subscription("unknown", None), go_subscription("active", None),
+            go_subscription("unknown", Some("not-a-date")), go_subscription("active", Some("2099-01-01T00:00:00Z"))] {
+            assert!(prune_expired_opencode(&file, &observed, &[subscription]).unwrap().is_empty());
+            assert_eq!(std::fs::read(&file).unwrap(), before);
+        }
+        let replaced = serde_json::json!({"opencode-go":{"type":"api","key":"new-key"}});
+        crate::profiles::write_private(&file, &replaced).unwrap();
+        assert!(prune_expired_opencode(&file, &observed, &[go_subscription("expired", None)]).unwrap().is_empty());
+        assert_eq!(read_json_file(&file).unwrap(), replaced);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn elapsed_billing_deadline_deletes_the_last_connection_and_invalid_files_are_preserved() {
+        let dir = std::env::temp_dir().join(format!("keyturn-deadline-{}", uuid::Uuid::new_v4()));
+        let file = dir.join("auth.json");
+        let observed = serde_json::json!({"opencode-go":{"key":"ended-key"}});
+        crate::profiles::write_private(&file, &observed).unwrap();
+        let subscription = go_subscription("unknown", Some("2000-01-01T00:00:00Z"));
+        assert_eq!(prune_expired_opencode(&file, &observed, &[subscription.clone()]).unwrap(), ["opencode-go"]);
+        assert_eq!(read_json_file(&file).unwrap(), serde_json::json!({}));
+        std::fs::write(&file, "invalid json").unwrap();
+        assert!(prune_expired_opencode(&file, &observed, &[subscription]).is_err());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "invalid json");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

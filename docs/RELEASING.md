@@ -1,91 +1,108 @@
-# Releasing
+# Releasing Keyturn
 
-The GitHub workflow is configured for signed, notarized universal macOS builds
-and an updater feed. Homebrew and Nix files are packaging templates.
+Source and releases: <https://github.com/amirmahdinezhad/keyturn>.
+The release target is universal macOS 12+ (Apple Silicon and Intel).
 
-Create a native release build or publish a release only when explicitly asked.
-Routine verification uses the dev app; do not replace the installed app.
+## Prepare and obtain approval
 
-## One-time setup
+For every feature or bug fix, finish implementation and the `AGENTS.md` local
+checklist in the native **dev tray panel** first. Keep development on port 5174.
+Prepare a patch version for compatible fixes, a minor version for features, or a
+major version for breaking changes. Synchronize `package.json`,
+`src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, the keyturn entry in
+`src-tauri/Cargo.lock`, and Homebrew/Nix template versions. Update versioned README
+download links and add English/Persian notes in `docs/releases/<version>.md`.
+Run `pnpm run release:check` and `pnpm run test:release`.
 
-1. **Updater signing key**
+Present the tested changes, proposed version and notes to the owner. Wait for
+explicit approval for that release before pushing its tag or publishing it.
+An explicit request to publish a named version already authorizes that version;
+it does not authorize later releases. Successful local tests are not approval.
+
+## Signing and GitHub setup
+
+The public endpoint is
+`https://github.com/amirmahdinezhad/keyturn/releases/latest/download/latest.json`.
+Installed apps do not need a GitHub account or token.
+
+The updater public key in `tauri.conf.json` is the **base64-encoded complete
+Minisign public-key file**, including its comment. The matching private key is
+outside the repository at `~/.tauri/keyturn-release.key`. Preserve and securely back up
+this key: replacing it breaks trust for existing installations.
+
+GitHub Actions secret `TAURI_SIGNING_PRIVATE_KEY` holds the base64-encoded
+complete private-key file, not its pathname or its raw Minisign line. Set
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if password protected. Never print these
+values or put them in repository files. Local `createUpdaterArtifacts` stays
+false; release builds override it to true.
+
+Current macOS builds use ad-hoc code signing (`signingIdentity: "-"`) and are
+**not Apple notarized**. The updater archive has a separate cryptographic
+signature verified by Tauri. Developer ID signing/notarization requires an Apple
+certificate and a notarization step before it can be advertised. First-launch
+macOS approval is explained in the README.
+
+## Publish an approved release
+
+1. Commit the reviewed app source, scripts and public docs. Keep credentials,
+   account data, screenshots and QA recordings out. Preserve unrelated work.
+   Push only the intended branch and tag, never checkpoint refs or a mirror.
+2. Push the reviewed commit and annotated version tag, for example:
 
    ```bash
-   pnpm exec tauri signer generate -w ~/.tauri/keyturn.key
+   git push origin main
+   git tag -a v1.0.1 -m "Keyturn 1.0.1"
+   git push origin v1.0.1
    ```
 
-   `src-tauri/tauri.conf.json` already contains an updater public key. Reuse its
-   matching private key for CI; generating a replacement requires updating the
-   public key too. The current workflow expects a passwordless private key.
-   Local config keeps `bundle.createUpdaterArtifacts` off; CI enables it.
+3. Wait for `.github/workflows/release.yml`. It checks the tag/version, frontend
+   and Rust tests, builds the universal app, signs and verifies its updater,
+   then creates a **draft**. Pushing main runs checks without publishing.
+4. Review the draft DMG, `Keyturn_universal.app.tar.gz`, `.sig`, `latest.json`
+   and `SHA256SUMS`. Feed notes and release body must match the reviewed notes.
+   Both darwin-aarch64 and darwin-x86_64 use the universal archive.
+   `pnpm run release:verify <asset-directory>` checks notes, immutable URLs,
+   checksums, embedded app version, CPU architectures, macOS code signature,
+   DMG integrity and the updater signature using Tauri's Minisign library.
+   Inspect the DMG once; never overwrite assets of a published version.
+5. After owner approval, with a clean tracked tree at the tagged commit, run:
 
-2. **Apple signing + notarization**
+   ```bash
+   pnpm run release:publish --approved
+   ```
 
-   Create a Developer ID Application certificate and an app-specific password
-   for notarization. CI expects these repository secrets:
+   It downloads and verifies the draft, publishes it as latest, and checks the
+   public feed and updater download without authentication. The flag records
+   the operator's decision; it is not a substitute for owner approval.
+6. Open the native dev panel → Settings → Updates → Check for updates. Confirm
+   the running version and server result. Test an actual upgrade on a separate
+   installed test copy when an older public version exists. Report the release
+   URL, all local checks and any installation test not performed.
 
-   | Secret | Value |
-   | --- | --- |
-   | `APPLE_CERTIFICATE` | base64 of the exported `.p12` |
-   | `APPLE_CERTIFICATE_PASSWORD` | password for the `.p12` |
-   | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)` |
-   | `APPLE_ID` | Apple account email |
-   | `APPLE_PASSWORD` | app-specific password |
-   | `APPLE_TEAM_ID` | 10-character team id |
-   | `TAURI_SIGNING_PRIVATE_KEY` | contents of the updater private key |
+For an explicitly authorized local build, provide the base64 private-key file
+contents in the process environment, install both Rust macOS targets, and run the
+same Tauri command as CI. Stage it using
+`node scripts/release.mjs assemble src-tauri/target/universal-apple-darwin/release/bundle`.
+Routine verification must leave `/Applications/Keyturn.app` intact.
 
-3. **Update endpoint**
+## Installed users
 
-   `tauri.conf.json` points at
-   `https://github.com/7SkyLab/keyturn/releases/latest/download/latest.json`.
-   `tauri-action` publishes that file with every release.
+Settings → Updates → **Check for updates** → **What's new** → **Download** →
+**Install & relaunch**. Manual checks reveal previously skipped releases.
+Opt-in daily automatic checks respect skips, can download with the panel closed,
+and wait for explicit installation. Release notes remain visible after download.
+Drafts and prereleases do not become the public latest update.
 
-## Cutting a release
+Pre-1.0 development builds used the old `7SkyLab/keyturn` endpoint and need one
+manual install of 1.0.0. Releases from 1.0.0 onward share the new feed and key.
 
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
+## Packaging templates
 
-`.github/workflows/release.yml` installs dependencies with pnpm 11 and the frozen
-lockfile, builds a universal macOS bundle, and uses the configured secrets for
-signing/notarization. It creates a **draft** GitHub release with the native
-assets and `latest.json`. Validate the draft assets before publishing; clients
-check the latest published release.
+`packaging/homebrew/keyturn.rb` is an unpublished cask template; set the release
+DMG checksum before using it in a tap. `flake.nix` has a fake dependency hash and
+is an unvalidated development/package template, not a supported distribution.
+The DMG background and editable source are in `packaging/dmg/`; dimensions and
+icon positions are in `src-tauri/tauri.conf.json`.
 
-The dev updater UI can show the running version and check errors. Its mocked
-tests cover release notes, skip-version storage, download progress and
-install/relaunch. Actual installation requires a compatible signed release
-and is not part of the normal dev checklist.
-
-## Homebrew
-
-`packaging/homebrew/keyturn.rb` is a cask template. After a release:
-
-1. Update `version` and `sha256` (from the release `.dmg`).
-2. Copy the file into your tap (`7SkyLab/homebrew-tap`) and push.
-
-Users then run `brew install --cask 7skylab/tap/keyturn`.
-
-## DMG window
-
-The installer window's background, icon positions and size live in
-`bundle > macOS > dmg` in `src-tauri/tauri.conf.json`. The artwork itself is
-`packaging/dmg/background.png` (660×400, the window size); its editable source is
-`packaging/dmg/background.html` — open it at 660×400 and re-capture after any
-change, then replace the PNG.
-
-## Nix
-
-`flake.nix` contains a dev shell and an unfinished package template. The package
-still has `npmDepsHash = pkgs.lib.fakeHash` and an npm-based install/build phase,
-while the release workflow uses pnpm. It has not been validated by the dev
-checklist; resolve dependency fetching and platform inputs before using it to
-distribute a release.
-
-After completing and validating the template, its package commands are:
-
-```bash
-nix build .#default
-nix run .#default
-```
+References: [Tauri updater](https://v2.tauri.app/plugin/updater/) and
+[macOS distribution](https://v2.tauri.app/distribute/macos-application-bundle/).

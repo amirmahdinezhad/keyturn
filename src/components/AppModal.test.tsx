@@ -63,4 +63,27 @@ describe("AppModal", () => {
     fireEvent.click(screen.getByLabelText("Close"));
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("blocks closing while a save is in flight", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<AppModal open onClose={onClose} title="Saving account" busy>Draft</AppModal>);
+    expect(screen.getByRole("button", { name: "Close" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("confirms a dirty back path and lets Escape keep the draft", async () => {
+    const user = userEvent.setup();
+    const back = vi.fn();
+    render(<AppModal open onClose={() => {}} title="Account" onBack={back} hasUnsavedChanges>Draft</AppModal>);
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("alertdialog", { name: "Discard changes?" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(back).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(back).toHaveBeenCalledOnce();
+  });
 });

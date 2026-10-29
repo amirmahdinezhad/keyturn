@@ -5,6 +5,7 @@ import {
   Chart1,
   CloseCircle,
   Copy,
+  Edit2,
   Eye,
   EyeSlash,
   InfoCircle,
@@ -110,3 +111,11 @@ export const EyeOffIcon = linear(EyeSlash);
 export const KeyIcon = linear(Key);
 export const TickIcon = linear(TickCircle);
 export const RefreshIcon = linear(Refresh);
+
+/** Two-way account switch, distinct from the data refresh action. */
+export function AccountSwitchIcon({ size = 20 }: IconProps) {
+  return <svg className="ak-icon" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8h15m-4-4 4 4-4 4M20 16H5m4-4-4 4 4 4" /></svg>;
+}
+
+/** Rename an account without changing its login. */
+export const EditIcon = linear(Edit2);

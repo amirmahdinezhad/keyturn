@@ -1,14 +1,16 @@
 import { Skeleton } from "./ui/skeleton";
-import { SpinnerIcon } from "../icons";
 
 /** Shown until the first backend state arrives. */
 export function LoadingSkeleton() {
   return (
-    <div className="loading" role="status" aria-label="Loading">
-      <SpinnerIcon size={44} className="loading-spinner ak-spin" />
-      <Skeleton className="skel" />
-      <Skeleton className="skel" />
-      <Skeleton className="skel" />
+    <div className="account-skeletons" role="status" aria-label="Loading">
+      <span className="sr-only">Loading accounts…</span>
+      {[0, 1, 2].map((row) => (
+        <div className="account-skeleton" key={row} aria-hidden="true">
+          <Skeleton className="account-skeleton-mark" />
+          <div><Skeleton className="account-skeleton-name" /><Skeleton className="account-skeleton-email" /></div>
+        </div>
+      ))}
     </div>
   );
 }

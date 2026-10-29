@@ -1,9 +1,7 @@
-import type { AppSettings, AppState } from "../types";
+import type { AppState } from "../types";
 
-export const DEFAULT_APP_SETTINGS: AppSettings = {
-  refreshIntervalSecs: 60,
-  usageShowRemaining: false,
-};
+import { DEFAULT_APP_SETTINGS } from "../types";
+export { DEFAULT_APP_SETTINGS } from "../types";
 
 export function makeState(over: Partial<AppState> = {}): AppState {
   return {

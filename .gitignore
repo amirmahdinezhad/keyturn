@@ -22,3 +22,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Signing material and local account/QA data never belong in public source.
+.env
+.env.*
+*.key
+*.p12
+*.p8
+*.mobileprovision
+.keyturn-*-qa.*
+release-artifacts/
+docs/verification/

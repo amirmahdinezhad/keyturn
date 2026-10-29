@@ -1,8 +1,8 @@
 [package]
 name = "keyturn"
-version = "0.1.0"
-description = "Menubar API-key manager for OpenCode"
-authors = ["you"]
+version = "1.0.0"
+description = "macOS menu-bar accounts and usage for AI coding assistants"
+authors = ["Amir Mahdi Nezhad"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -27,14 +27,25 @@ tauri-plugin-autostart = "2"
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.13", features = ["blocking", "json"] }
+sha2 = "0.10"
+libc = "0.2"
+reqwest = { version = "0.13", features = ["blocking", "json", "form"] }
 dirs = "7"
 chrono = "0.4"
 base64 = "0.22"
+toml = "1.1"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSApplication", "NSWindow", "NSRunningApplication", "NSWorkspace", "NSBitmapImageRep", "NSImageRep", "NSGraphicsContext", "NSGraphics", "NSStringDrawing", "NSAttributedString", "NSFont", "NSColor", "NSBezierPath", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSArray", "NSURL", "NSDictionary", "NSAttributedString", "NSGeometry"] }
 
 [dev-dependencies]
+minisign-verify = "0.2.5"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 

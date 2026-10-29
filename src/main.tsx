@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import "./panel.css";
 import { applyDisplayPrefs, loadDisplayPrefs } from "./displayPrefs";
 
 // Paint theme + accent before first paint so the panel never flashes.

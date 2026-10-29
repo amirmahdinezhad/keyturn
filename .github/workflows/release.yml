@@ -1,68 +1,52 @@
-name: release
-
-# Publishes signed, notarized builds plus the updater feed (`latest.json`).
-#
-# REQUIRED SECRETS (repo Settings → Secrets and variables → Actions):
-#   TAURI_SIGNING_PRIVATE_KEY  — content of ~/.tauri/keyturn.key
-#                                (passwordless minisign key; no *_PASSWORD needed)
-#   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / APPLE_SIGNING_IDENTITY /
-#   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID — Apple notarization.
-#
-# FLOW: push a v* tag (e.g. `git tag v0.2.0 && git push origin v0.2.0`) →
-# a DRAFT release appears with the DMG + latest.json → test the DMG once →
-# publish the release. Clients pick it up via Settings → Check now.
-
+name: Release draft
 on:
   push:
-    tags:
-      - "v*"
-  workflow_dispatch:
-
+    tags: ["v*"]
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   release:
-    runs-on: macos-14
+    runs-on: macos-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-
-      - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build, sign, notarize and publish
-        uses: tauri-apps/tauri-action@v0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run release:check
+      - name: Typecheck and frontend tests
+        run: |
+          pnpm exec tsc --noEmit
+          pnpm exec vitest run
+          pnpm run test:release
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+      - name: Build universal macOS app and signed update
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Keyturn ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install this version."
-          releaseDraft: true
-          prerelease: false
-          # Updater artifacts are produced in CI (a local build without the
-          # signing key would fail with createUpdaterArtifacts enabled).
-          args: --target universal-apple-darwin --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          pnpm exec tauri build --ci --target universal-apple-darwin --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}' -- --locked
+      - name: Assemble and verify release assets
+        run: node scripts/release.mjs assemble src-tauri/target/universal-apple-darwin/release/bundle
+      - name: Create draft for owner-approved publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          gh release create "$GITHUB_REF_NAME" release-artifacts/* --verify-tag --draft --title "Keyturn $VERSION" --notes-file "docs/releases/$VERSION.md"

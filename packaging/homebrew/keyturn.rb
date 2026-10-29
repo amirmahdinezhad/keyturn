@@ -1,12 +1,12 @@
 cask "keyturn" do
-  version "0.1.0"
+  version "1.0.0"
   sha256 "REPLACE_WITH_DMG_SHA256"
 
-  url "https://github.com/7SkyLab/keyturn/releases/download/v#{version}/Keyturn_#{version}_universal.dmg",
-      verified: "github.com/7SkyLab/keyturn/"
+  url "https://github.com/amirmahdinezhad/keyturn/releases/download/v#{version}/Keyturn_#{version}_universal.dmg",
+      verified: "github.com/amirmahdinezhad/keyturn/"
   name "Keyturn"
   desc "Menubar API-key manager and quota monitor for AI coding CLIs"
-  homepage "https://github.com/7SkyLab/keyturn"
+  homepage "https://github.com/amirmahdinezhad/keyturn"
 
   livecheck do
     url :url

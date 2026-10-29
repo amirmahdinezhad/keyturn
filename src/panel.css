@@ -1,0 +1,557 @@
+/* Shared desktop rhythm: 4px spacing, 8px controls, 12px groups, 16px sheets.
+ * Account/provider colors are identity; global actions use the workspace accent.
+ * Grouped rows follow native preferences; peer tabs change without travel. */
+:root {
+  --radius-l: 16px;
+  --warning-threshold: #ffd60a;
+  --shadow-popover: 0 8px 24px rgb(0 0 0 / 20%);
+  --shadow-sheet: 0 16px 48px rgb(0 0 0 / 32%);
+  --ease-ios: var(--ease-out);
+  --accent-action: #0070eb;
+  --accent-action-hover: #0068dd;
+  --control-hover: color-mix(in srgb, var(--fg) 5%, transparent);
+  --control-pressed: color-mix(in srgb, var(--fg) 9%, transparent);
+  --control-hover-fill: color-mix(in srgb, var(--raised) 94%, var(--fg));
+  --control-pressed-fill: color-mix(in srgb, var(--raised) 89%, var(--fg));
+}
+[data-theme="light"] {
+  --warning-threshold: #8a5300;
+  --shadow-popover: 0 8px 24px rgb(30 40 55 / 12%);
+  --shadow-sheet: 0 16px 48px rgb(30 40 55 / 18%);
+  --danger: #c83238;
+  --danger-bg: rgb(200 50 56 / 8%);
+  --control-hover: color-mix(in srgb, var(--fg) 4%, transparent);
+  --control-pressed: color-mix(in srgb, var(--fg) 8%, transparent);
+  --control-hover-fill: color-mix(in srgb, var(--raised) 96%, var(--fg));
+  --control-pressed-fill: color-mix(in srgb, var(--raised) 93%, var(--fg));
+}
+body { line-height: 1.5; -webkit-font-smoothing: antialiased; }
+#root { padding: 16px; min-width: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+button { -webkit-tap-highlight-color: transparent; }
+.ui-button { min-height: 44px; line-height: 1.25; transition: background 120ms var(--ease-out), color 120ms var(--ease-out), transform 120ms var(--ease-out); }
+.ui-button-sm { height: auto; min-height: 44px; padding: 8px 12px; }
+.ui-button-icon, .ui-button-icon-sm, button.icon { width: 44px; height: 44px; padding: 0; }
+.ui-button:is(.ui-button-primary, .primary) { font-weight: 600; background: var(--accent-action); color: #fff; }
+.ui-button:is(.ui-button-primary, .primary):hover { background: var(--accent-action-hover); }
+:is(.row, .profile-open, .workspace-manage-row, .ui-tabs-trigger, .ui-toggle-group-item):active { transform: none; }
+.ui-button-ghost:hover:enabled { background: var(--control-hover); }
+.ui-button-secondary:active:enabled, .ui-select-trigger:active:enabled { background: var(--control-pressed-fill); }
+.ui-button-ghost:active:enabled { background: var(--control-pressed); }
+/* Toolbar feedback changes material, keeping the glyph and its hit area steady. */
+.ui-button:is(.ui-button-icon, .ui-button-icon-sm, .icon):active { transform: none; }
+[data-theme="light"] :is(.ui-button-primary, button.primary):hover { background: var(--accent-action-hover); }
+[data-theme="light"] .ui-button-destructive:hover { background: var(--danger); }
+[data-theme="light"] .ui-button-link:hover { background: transparent; }
+input, textarea, .ui-select-trigger { font-family: var(--font); }
+:is(.workspace-form, .profile-form) input, .workspace-accent input { height: 44px; min-height: 44px; }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: .8; }
+input:disabled, textarea:disabled { opacity: .5; }
+
+/* Stable toolbar, with the workspace as the navigation anchor. */
+.app-header { flex-shrink: 0; gap: 4px; padding: 0 0 16px; margin: 0 0 12px; border-color: var(--inset-line); }
+.brand { gap: 8px; letter-spacing: -.2px; }
+.brand .app-mark { width: 32px; height: 32px; }
+.brand-caption { color: var(--muted); font-size: 10px; line-height: 1.2; letter-spacing: .4px; font-weight: 500; }
+.workspace-brand { gap: 4px; flex: 1; }
+.workspace-brand .ui-select-trigger { min-width: 0; width: 100%; max-width: 160px; height: 28px; min-height: 28px; margin-left: -6px; padding: 2px 6px; border: 0; background: transparent; font-size: 15px; letter-spacing: -.2px; }
+.workspace-brand .ui-select-trigger:hover:enabled { background: var(--control-hover); }
+.workspace-brand .ui-select-trigger:is(:active, [data-state="open"]):enabled { background: var(--control-pressed); }
+.brand-updated { font-size: 10px; line-height: 1.2; font-weight: 400; }
+.header-actions { gap: 0; }
+.app-header .header-actions .ui-button { border-radius: var(--radius-s); }
+.app-header .header-actions .ui-button:hover:enabled { background: var(--control-hover); color: var(--fg); }
+.app-header .header-actions .ui-button:active:enabled { background: var(--control-pressed); }
+.app-header .header-actions .quit-header-btn:hover:enabled { background: var(--danger-bg); color: var(--danger); }
+.providers { gap: 16px; min-height: 0; padding: 0 0 12px; scrollbar-gutter: auto; scrollbar-width: none; }
+.providers::-webkit-scrollbar { display: none; }
+main.providers { padding-bottom: 12px; }
+.workspace-section-head { margin-bottom: 8px; gap: 8px; min-height: 44px; }
+.workspace-section-title { gap: 0; min-width: 0; }
+.workspace-section-title h2 { font-size: 13px; letter-spacing: -.1px; }
+.workspace-section-title h2 span { font-size: 11px; margin-left: 8px; font-variant-numeric: tabular-nums; }
+.workspace-section-head > .ui-button { color: var(--accent-hover); padding-right: 8px; }
+.workspace-account-list { padding: 0 12px; border: 1px solid var(--inset-line); border-radius: var(--radius-m); }
+.workspace-account { padding: 16px 0; }
+.workspace-account-row { gap: 12px; flex-wrap: wrap; }
+.workspace-account-mark { width: 40px; height: 44px; border-radius: var(--radius-s); }
+.workspace-account-info { flex-basis: 120px; }
+.workspace-account-title { flex-wrap: wrap; gap: 4px 8px; }
+.workspace-account-title .row-title { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 14px; line-height: 1.35; font-weight: 600; }
+.workspace-account-email { font-size: 11px; margin-top: 4px; }
+.workspace-account-plan { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.workspace-account-plan .plan-badge { font-size: 10px; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.workspace-account-actions { margin-left: auto; gap: 0; }
+.workspace-account-actions .ui-button { width: 44px; height: 44px; color: var(--muted); }
+.workspace-account-actions .ui-button:hover:enabled { color: var(--fg); background: var(--control-hover); }
+.workspace-account-actions .ui-button:active:enabled { background: var(--control-pressed); }
+.workspace-active-badge { color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 22%, transparent); border-radius: 4px; padding: 1px 5px; font-size: 10px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.workspace-active-badge::before { content: "✓"; width: auto; height: auto; background: none; border-radius: 0; font-size: 10px; line-height: 1; }
+[data-theme="light"] :is(.workspace-section-head > .ui-button, .workspace-steps .current .workspace-step-number, .workspace-steps .complete .workspace-step-number) { color: var(--accent-action); }
+[data-theme="light"] .workspace-account-mark { color: var(--accent-action); }
+.workspace-account .account-limit-notice { margin-top: 12px; padding-top: 12px; border-color: var(--inset-line); }
+.other-providers { margin-top: 0; border-color: var(--inset-line); }
+.other-providers > summary { min-height: 44px; padding: 12px 4px; }
+.other-providers .cli-card { padding: 12px 4px; }
+.other-providers .cli-head .row-title::before { display: none; }
+.other-providers .cli-head .plogo { color: var(--fg); }
+.add-provider-quiet { width: 100%; justify-content: flex-start; border-radius: var(--radius-s); color: var(--muted); }
+.cli-card { animation: none; border-radius: var(--radius-m); }
+.cli-head { gap: 12px; }
+.cli-head .row-title { font-size: 14px; font-weight: 600; }
+.cli-head .row-sub { font-size: 11px; }
+.cli-card .icon-only.usage-icon-btn { border-radius: var(--radius-s); }
+.plan-badge { border-radius: 4px; box-shadow: none; }
+[data-theme="light"] .plogo svg[viewBox="0 0 512 512"] path:first-of-type { fill: var(--fg); }
+[data-theme="light"] .plogo svg[viewBox="0 0 512 512"] path:last-of-type { fill: var(--muted); }
+.cost-badge { color: var(--fg); background: var(--inset); border-color: var(--inset-line); }
+.empty-icon, .info-ghost, .cost-info, .dots-label { color: var(--muted); }
+
+/* One sheet shell: fixed title and navigation, independently scrolling content. */
+.ak-backdrop { background: var(--overlay); }
+.ak-dialog { width: calc(100% - 24px); max-width: 406px; max-height: calc(100dvh - 24px); padding: 16px; border-radius: var(--radius-l); border-color: var(--line); box-shadow: var(--shadow-sheet); overflow: hidden; }
+.ak-dialog .modal-head { min-height: 44px; margin-bottom: 16px; padding: 0 44px; }
+.ak-heading { font-size: 15px; line-height: 1.35; letter-spacing: -.2px; overflow-wrap: anywhere; }
+.modal-head .icon { color: var(--muted); background: transparent; border: 0; }
+.modal-head :is(.icon, .modal-back):hover:enabled { color: var(--fg); background: var(--control-hover); }
+.modal-head :is(.icon, .modal-back):active:enabled { background: var(--control-pressed); transform: translateY(-50%); }
+.modal-back.ui-button { width: 44px; height: 44px; min-height: 44px; }
+.modal-back:active { transform: translateY(-50%); }
+.app-modal-body { overscroll-behavior: contain; scrollbar-gutter: stable; padding: 4px; scroll-padding-block: 8px; }
+.modal-detail { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--inset-line); }
+.discard-confirm { gap: 16px; max-width: 354px; }
+.discard-confirm p { margin: 0; color: var(--muted); font-size: 13px; text-align: center; }
+.discard-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.settings-card, .workspace-settings-card { height: min(552px, calc(100dvh - 24px)); }
+.settings-card .app-modal-body, .workspace-settings-card .app-modal-body { flex: 1; }
+.settings-body { padding: 0; }
+.settings-panel, .settings-general { gap: 16px; }
+.settings-panel[data-state="active"] { animation: none; }
+.settings-subtitle { color: var(--muted); font-size: 11px; font-weight: 600; line-height: 1.4; margin: 0 0 8px 4px; letter-spacing: .2px; }
+.settings-panel > .settings-subtitle { margin-bottom: -8px; }
+.settings-group { padding: 0 12px; border-radius: var(--radius-m); border-color: var(--inset-line); background: var(--inset); }
+.settings-group .setting-row, .settings-group .setting-row:first-of-type { min-height: 56px; padding: 8px 0; gap: 12px; }
+.settings-group .setting-name { font-size: 12px; line-height: 1.4; font-weight: 500; }
+.settings-group .setting-desc { font-size: 11px; line-height: 1.5; }
+.setting-text, .setting-name { min-width: 0; overflow-wrap: anywhere; }
+.setting-note { font-size: 11px; line-height: 1.5; }
+.setting-action { max-width: 66%; }
+.ui-select-trigger { min-height: 44px; }
+.ui-select-content { border-radius: var(--radius-m); box-shadow: var(--shadow-popover); }
+.ui-select-item { min-height: 44px; border-radius: var(--radius-s); }
+.ui-tooltip { box-shadow: var(--shadow-popover); }
+.settings-footer { padding-top: 4px; }
+/* Inline form actions use the compact desktop control size. */
+.reset-settings.ui-button,
+.account-edit-form > .ui-button-sm,
+.account-preferences .threshold-form > .ui-button-sm {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.reset-settings.ui-button { color: var(--fg); }
+button.ui-switch { position: relative; }
+button.ui-switch::before { content: ""; position: absolute; inset: -11px -3px; }
+button.ui-checkbox, button.ui-radio { position: relative; }
+button.ui-checkbox::before, button.ui-radio::before { content: ""; position: absolute; inset: -14px; }
+.ui-slider { min-height: 44px; }
+.ui-slider-thumb:active { transform: none; }
+.workspace-tabs { margin: 0 0 16px; padding: 4px; gap: 4px; border-radius: var(--radius-s); background: var(--inset); flex-shrink: 0; }
+.workspace-tabs [role="tab"], .ios-segments .settings-tab, .ios-segments .segment { min-height: 44px; padding: 8px 4px; border-radius: var(--radius-s); font-size: 12px; }
+.settings-tabs { margin-bottom: 16px; padding: 4px; }
+.ios-segments::before { transition: none; border-radius: var(--radius-s); box-shadow: 0 1px 3px rgb(0 0 0 / 12%); }
+.workspace-tabs [role="tab"][data-state="active"] { background: var(--raised); color: var(--title); box-shadow: 0 1px 3px rgb(0 0 0 / 12%); }
+/* Hover stays quieter than selection and never covers the segment indicator. */
+.workspace-tabs [role="tab"]:not([data-state="active"]):hover:enabled,
+.ios-segments :is(.settings-tab, .segment):hover:enabled { background: var(--control-hover); color: var(--title); }
+.workspace-tabs [role="tab"]:not([data-state="active"]):active:enabled,
+.ios-segments :is(.settings-tab, .segment):active:enabled { background: var(--control-pressed); }
+.ui-select-trigger[data-state="open"] { background: var(--control-pressed-fill); }
+.workspace-settings-card > .workspace-tabs { width: auto; }
+.workspace-settings-card .ui-tabs-content { min-width: 0; }
+.workspace-settings-card .settings-section + .settings-section { margin-top: 20px; }
+.page-intro { margin: 0 0 20px; }
+.page-intro h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
+.page-intro p { color: var(--muted); margin: 0; font-size: 12px; }
+.workspace-manage-list { border: 1px solid var(--inset-line); border-radius: var(--radius-m); background: var(--inset); padding: 0 12px; }
+.workspace-manage-row.ui-button { width: 100%; justify-content: flex-start; gap: 12px; padding: 16px 0; text-align: left; white-space: normal; border-radius: 0; }
+.workspace-manage-row + .workspace-manage-row { border-top: 1px solid var(--inset-line); }
+.workspace-manage-row .row-main { flex: 1; min-width: 0; }
+.workspace-manage-row strong { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.workspace-manage-row .row-sub { font-size: 11px; overflow-wrap: anywhere; white-space: normal; }
+.workspace-manage-row > svg { color: var(--muted); }
+.account-edit-form { gap: 12px; margin-bottom: 20px; }
+.account-edit-form > button { margin-bottom: 0; }
+.account-edit-form input { height: 32px; min-height: 32px; padding: 6px 10px; font-size: 13px; }
+.account-preferences { margin-top: 20px; padding-top: 20px; border-color: var(--inset-line); }
+.account-preference-section > summary { min-height: 44px; padding: 16px 4px; }
+.workspace-remove, .profile-remove { border-color: var(--inset-line); }
+.workspace-remove > .ui-button-destructive:not(:last-child) { margin-bottom: 8px; }
+
+/* Setup is a short task: clear steps, useful labels and a stable action row. */
+.workspace-setup { padding: 8px 4px; }
+main.providers > .workspace-setup { flex: 1; display: flex; flex-direction: column; }
+main.providers > .workspace-setup > .workspace-form { flex: 1; }
+main.providers > .workspace-setup .workspace-form-actions { margin-top: auto; }
+.workspace-setup-card.ak-dialog { min-height: 0; }
+.setup-steps { --step-spacing: calc(100% / var(--step-count)); position: relative; display: grid; grid-template-columns: repeat(var(--step-count), minmax(0, 1fr)); list-style: none; padding: 0; margin: 0 0 24px; isolation: isolate; }
+.setup-steps::before, .setup-steps::after { content: ""; position: absolute; left: calc(var(--step-spacing) / 2); right: calc(var(--step-spacing) / 2); top: 13px; height: 2px; background: var(--line); z-index: -1; }
+.setup-steps::after { background: var(--accent); transform: scaleX(var(--step-progress)); transform-origin: left; transition: transform 300ms var(--ease-ios); }
+.setup-steps .wizard-step { display: flex; flex-direction: column; align-items: center; gap: 7px; font-size: 11px; color: var(--muted); }
+.setup-step-dot { display: grid; place-items: center; width: 28px; height: 28px; border: 2px solid var(--line); border-radius: 50%; background: var(--bg); transition: background 250ms, border-color 250ms, color 250ms; }
+.setup-steps :is(.is-now, .is-done) { color: var(--fg); }
+.setup-steps :is(.is-now, .is-done) .setup-step-dot { border-color: var(--accent); color: var(--accent-hover); background: var(--bg); }
+.setup-steps .is-done .setup-step-dot { background: var(--accent); color: white; }
+.setup-privacy { color: var(--muted); font-size: 11px; }
+.provider-group-title { display: flex; align-items: center; gap: 8px; margin: 8px 0; color: var(--muted); font-size: 12px; font-weight: 500; }
+.provider-group-title span { font-variant-numeric: tabular-nums; color: var(--fg); }
+.provider-account-groups { display: flex; flex-direction: column; gap: 16px; }
+.workspace-steps { list-style: none; padding: 0; margin: 0 0 24px; gap: 24px; }
+.workspace-steps li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.workspace-step-number { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 50%; font-size: 11px; font-variant-numeric: tabular-nums; }
+.workspace-steps .current { color: var(--fg); }
+.workspace-steps .current .workspace-step-number, .workspace-steps .complete .workspace-step-number { color: var(--accent-hover); background: var(--accent-bg); border-color: transparent; }
+.workspace-setup h2 { margin: 0 0 8px; font-size: 23px; letter-spacing: -.5px; line-height: 1.25; }
+.workspace-intro { font-size: 12px; line-height: 1.6; color: var(--muted); margin: 0 0 24px; max-width: 320px; }
+.workspace-form { gap: 20px; }
+.workspace-setup .workspace-steps { margin-bottom: 16px; }
+.workspace-setup .workspace-intro { margin-bottom: 16px; }
+.workspace-setup .workspace-form { gap: 12px; }
+.workspace-setup .workspace-form textarea { height: 104px; }
+.workspace-form label, .form-label { color: var(--fg); font-size: 12px; font-weight: 500; gap: 8px; }
+.form-field { display: flex; flex-direction: column; gap: 8px; }
+.form-field .setting-note { margin: 0; }
+.workspace-form textarea { height: 144px; max-height: 220px; padding: 12px; line-height: 1.6; font-family: var(--mono); font-size: 11px; border-radius: var(--radius-s); }
+.workspace-form .workspace-tabs { margin-bottom: 8px; }
+.workspace-form .ui-tabs-content { outline: none; }
+.auth-file-drop { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border: 1px dashed var(--line); border-radius: var(--radius-m); background: var(--inset); text-align: center; }
+.auth-file-drop > svg { color: var(--muted); }
+.auth-file-drop.is-dragging { border-color: var(--accent); background: var(--accent-bg); }
+.auth-file-drop.is-dragging > svg { color: var(--accent-hover); }
+.auth-file-drop { transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease; }
+.auth-file-drop.is-dragging { border-style: solid; box-shadow: inset 0 0 0 2px var(--accent); }
+.auth-file-symbol { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--raised-dark); color: var(--muted); }
+.auth-file-drop:is(.is-filled, .is-dragging) .auth-file-symbol { color: var(--accent-hover); background: var(--accent-bg); }
+.auth-file-drop.has-error { border-color: var(--danger); }
+.auth-file-drop[aria-disabled="true"] { opacity: .6; }
+.auth-file-caption { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: 100%; }
+.auth-file-caption strong { color: var(--fg); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.auth-file-caption span { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.auth-file-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.workspace-form .auth-file-path { margin-top: 4px; color: var(--muted); }
+.auth-file-path summary { min-height: 44px; align-content: center; font-size: 11px; cursor: pointer; }
+.auth-file-path label { padding: 4px 0 12px; }
+.auth-file-input .workspace-error { margin-bottom: 0; }
+.workspace-form-actions { margin-top: 4px; padding: 12px 0 4px; border-top: 1px solid var(--inset-line); }
+.workspace-form-actions > .ui-button-primary { margin-left: auto; min-width: 132px; }
+.workspace-accent { gap: 12px; }
+.accent-grid { gap: 0; padding: 0; }
+.accent-dot.ui-button { width: 44px; height: 44px; min-height: 44px; background: transparent; border: 0; border-radius: var(--radius-s); outline: none; position: relative; isolation: isolate; }
+.accent-dot::before { content: ""; position: absolute; inset: 9px; background: var(--dot); border-radius: 50%; z-index: -1; }
+.accent-dot.on::before { outline: 2px solid var(--dot); outline-offset: 3px; }
+.accent-dot.ui-button:hover:enabled { background: var(--control-hover); transform: none; }
+.accent-dot.ui-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.accent-dot.ui-button:active { transform: none; }
+.accent-dot svg { opacity: 1; transform: none; }
+.workspace-accent .accent-picker { position: relative; display: grid !important; place-items: center; width: 44px; height: 44px; min-height: 44px; padding: 9px; border: 0; border-radius: var(--radius-s); background: transparent; }
+.workspace-accent .accent-picker input { position: absolute; inset: 0; width: 44px; height: 44px; min-height: 0; padding: 0; opacity: 0; cursor: pointer; pointer-events: auto; }
+.accent-picker:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
+.accent-picker.is-custom .accent-picker-swatch { outline: 2px solid var(--accent); outline-offset: 3px; }
+.workspace-accent .accent-picker-swatch { width: 26px; height: 26px; border: 0; box-shadow: none; pointer-events: none; }
+.form-local-note { display: flex; align-items: flex-start; gap: 8px; color: var(--muted); font-size: 11px; line-height: 1.5; margin: -4px 0 0; }
+.form-local-note svg { flex: 0 0 16px; margin-top: 1px; }
+.workspace-error, .wizard-error { background: var(--danger-bg); color: var(--danger); border-radius: var(--radius-s); padding: 12px; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.row { min-height: 64px; border-radius: var(--radius-m); }
+.wizard-pane, .setup-card .stack { animation: none; }
+.wizard-foot > .primary, .profiles-card .wizard-foot > .primary, .setup-card .wizard-foot .primary { min-height: 44px; }
+.setup-docs { display: flex; align-items: center; min-height: 44px; color: var(--accent-hover); }
+[data-theme="light"] .setup-docs { color: var(--accent-action); }
+.profile-row, .account-connection, .claude-profile-usage { border-radius: var(--radius-m); }
+.profile-open.ui-button { min-height: 56px; padding: 8px; }
+.profile-open .row-sub { user-select: text; }
+.profile-form { gap: 12px; }
+.profiles-card .app-modal-body { display: flex; flex-direction: column; gap: 16px; }
+.profiles-card .setting-note, .profiles-card .wizard-foot { margin: 0; }
+.profiles-card .profile-remove { margin-top: 4px; }
+.profile-form input, .profile-form textarea { border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--inset); color: var(--fg); }
+.account-connection { flex-wrap: wrap; gap: 12px; }
+.account-connection button { min-height: 44px; }
+.profile-plan .plan-badge { box-shadow: none; }
+.update-card { border-radius: var(--radius-m); padding: 16px; gap: 16px; }
+.update-primary { min-height: 44px; }
+.secure-updates { background: var(--inset); border: 1px solid var(--inset-line); border-radius: var(--radius-m); }
+.secure-updates svg { color: var(--muted); }
+.percentage-preview { border-radius: var(--radius-m); }
+
+/* Usage values stay in place while their source refreshes. */
+.usage-identity { display: flex; flex-direction: column; gap: 4px; }
+.usage-identity strong { font-size: 15px; overflow-wrap: anywhere; }
+.usage-identity > span { color: var(--muted); font-size: 11px; font-weight: 400; user-select: text; overflow-wrap: anywhere; }
+.quota-windows { gap: 0; }
+.quota-windows + .quota-windows { margin-top: 16px; }
+.usage-row { padding: 16px 0; gap: 12px; }
+.usage-row + .usage-row { border-top: 1px solid var(--inset-line); }
+.usage-row:first-child { padding-top: 0; }
+.usage-top { align-items: baseline; gap: 12px; }
+.usage-name { font-size: 13px; font-weight: 500; }
+.usage-row .usage-pct { color: var(--usage-value); font-family: var(--font); font-size: 24px; line-height: 1.2; letter-spacing: -.5px; font-variant-numeric: tabular-nums; user-select: text; }
+.usage-reset { color: var(--muted); }
+.usage-track { --usage-color: var(--usage-source); }
+[data-theme="light"] .usage-row .usage-pct { color: color-mix(in srgb, var(--usage-value) 65%, #000); }
+[data-theme="light"] .usage-track { --usage-color: color-mix(in srgb, var(--usage-source) 65%, #000); }
+[data-theme="light"] .usage-bar { background: var(--line); }
+.usage-bar { height: 6px; }
+.usage-meta { font-size: 11px; line-height: 1.5; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cli-hint { margin: 0; padding: 16px; border: 1px solid var(--inset-line); border-radius: var(--radius-m); background: var(--inset); color: var(--muted); line-height: 1.6; overflow-wrap: anywhere; }
+.usage-card .quota-sub { margin-top: 4px; }
+.empty-state { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px 20px; background: var(--card); border: 1px solid var(--inset-line); border-radius: var(--radius-m); text-align: center; }
+.empty-state-symbol { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; border-radius: var(--radius-m); background: var(--inset); color: var(--muted); }
+.empty-state h3 { margin: 0; color: var(--title); font-size: 15px; font-weight: 600; letter-spacing: -.2px; }
+.empty-state p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; user-select: text; }
+.account-skeletons { border: 1px solid var(--inset-line); border-radius: var(--radius-m); background: var(--card); padding: 0 16px; }
+.account-skeleton { display: flex; gap: 12px; align-items: center; padding: 20px 0; }
+.account-skeleton + .account-skeleton { border-top: 1px solid var(--inset-line); }
+.account-skeleton > div { flex: 1; }
+.account-skeleton .account-skeleton-mark { width: 40px; height: 44px; flex: 0 0 40px; border-radius: var(--radius-s); }
+.account-skeleton-name { width: 58%; height: 12px; border-radius: 4px; margin-bottom: 12px; }
+.account-skeleton-email { width: 80%; height: 8px; border-radius: 4px; }
+.quota-skeleton { display: flex; flex-direction: column; gap: 32px; padding: 8px 0 16px; }
+.quota-skeleton-label { width: 40%; height: 16px; margin-bottom: 16px; border-radius: 4px; }
+.quota-skeleton-bar { width: 100%; height: 6px; border-radius: 4px; }
+.ak-toast { max-width: calc(100% - 32px); border-radius: var(--radius-m); box-shadow: var(--shadow-popover); overflow-wrap: anywhere; }
+
+@media (max-width: 400px) {
+  #root { padding: 12px; }
+  .brand .app-mark { display: none; }
+  .workspace-account-row { gap: 8px; }
+  .workspace-account-info { flex-basis: 100px; }
+  .setting-row:has(.setting-action > .segmented) { flex-wrap: wrap; }
+  .setting-row:has(.setting-action > .segmented) .setting-action { max-width: 100%; margin-left: auto; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+  .ui-button:active { transform: none; }
+  .modal-head :is(.icon, .modal-back):active { transform: translateY(-50%); }
+}
+
+/* Discovery uses account rows; privacy stays quiet below the action. */
+.workspace-form > .setup-privacy { margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+
+/* The setup content scrolls independently of its quiet, persistent privacy footer. */
+main.providers:has(> .workspace-setup) { overflow: hidden; padding-bottom: 0; }
+.workspace-setup { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.workspace-setup-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 2px 8px; overscroll-behavior: contain; }
+.workspace-setup-footer { flex-shrink: 0; padding: 10px 2px 2px; border-top: 1px solid var(--inset-line); }
+.workspace-setup-footer .setup-privacy { text-align: center; margin: 0; font-size: 9px; line-height: 1.5; color: var(--muted); }
+.workspace-setup-card.ak-dialog { height: min(560px, calc(100dvh - 24px)); }
+.workspace-setup-card .app-modal-body { flex: 1; display: flex; overflow: hidden; padding-bottom: 0; }
+.workspace-setup-card .workspace-setup { flex: 1; }
+.setup-account-tools { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
+.setup-account-placeholder { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 28px 20px; gap: 12px; color: var(--muted); background: var(--inset); border-radius: var(--radius-m); }
+.setup-account-placeholder > svg { color: var(--muted); }
+.setup-account-placeholder strong { color: var(--fg); font-size: 14px; font-weight: 500; }
+.setup-account-placeholder p { margin: 0; font-size: 12px; line-height: 1.6; max-width: 29ch; }
+.setup-selection-summary { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.setup-account-list { display: flex; flex-direction: column; gap: 8px; }
+.setup-account-option { display: flex; align-items: center; gap: 12px; padding: 14px 12px; min-height: 72px; background: var(--inset); border: 1px solid var(--line); border-radius: var(--radius-m); cursor: pointer; transition: background 120ms, border-color 120ms; }
+.setup-account-option.is-selected { background: var(--accent-bg); border-color: var(--accent); }
+.setup-account-option:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.setup-account-identity { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.setup-account-identity strong { color: var(--fg); font-size: 13px; font-weight: 500; }
+.setup-account-identity > span { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; user-select: text; }
+.setup-account-plans { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.setup-account-note { margin: 12px 0; font-size: 11px; line-height: 1.5; color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .setup-account-option { transition: none; } }
+.workspace-setup-footer .workspace-form-actions { border: 0; margin: 0; padding: 0 0 10px; }
+/* Add-account rows share the panel's native list rhythm and one accent. */
+.account-enrollment { display: flex; flex-direction: column; gap: 16px; }
+.enrollment-choices { display: flex; flex-direction: column; gap: 8px; }
+.enrollment-choices .enrollment-choice { justify-content: flex-start; width: 100%; min-height: 76px; padding: 14px 12px; gap: 12px; border: 1px solid var(--line); background: var(--inset); border-radius: var(--radius-m); text-align: left; white-space: normal; }
+.enrollment-choice > span:not(.plogo) { display: flex; flex: 1; flex-direction: column; gap: 4px; }
+.enrollment-choice strong { font-size: 13px; font-weight: 500; color: var(--fg); }
+.enrollment-choice span span { font-size: 11px; line-height: 1.5; color: var(--muted); }
+.enrollment-back { align-self: flex-start; min-height: 44px; padding-inline: 4px; gap: 6px; }
+.enrollment-name { display: flex; flex-direction: column; gap: 8px; }
+.enrollment-notice { margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.enrollment-login, .enrollment-success { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--radius-m); background: var(--inset); }
+.enrollment-login strong, .enrollment-success strong { font-size: 13px; font-weight: 500; }
+.enrollment-login p, .enrollment-success p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.enrollment-login summary { min-height: 44px; font-size: 12px; cursor: pointer; }
+.enrollment-code { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.enrollment-code code { user-select: text; font-size: 18px; letter-spacing: 1px; }
+.enrollment-ready { padding-top: 12px; border-top: 1px solid var(--inset-line); color: var(--muted); font-size: 11px; }
+.enrollment-ready-row, .enrollment-saved-row { display: flex; align-items: center; gap: 8px; padding-block: 8px; }
+.enrollment-ready-row > span:not(.plogo) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.enrollment-ready-row .plogo { width: 20px; height: 20px; }
+.enrollment-ready-row .ui-button { color: var(--danger); }
+.workspace-setup-footer .workspace-form-actions { flex-wrap: wrap; }
+
+/* Fixed wizard progress and compact actions; only the page content scrolls. */
+.workspace-setup-header { flex-shrink: 0; padding: 0 2px; }
+.workspace-setup-header .setup-steps { margin-bottom: 18px; }
+.workspace-setup-footer { border-top: 0; padding: 10px 2px 2px; }
+.workspace-setup-footer .workspace-form-actions { justify-content: space-between; padding-bottom: 2px; }
+.workspace-setup-footer .workspace-form-actions > .ui-button { min-width: 80px; height: 33px; padding-block: 0; }
+.workspace-setup-footer .workspace-back-button { border-color: var(--line); }
+.workspace-setup .ui-button:not(.accent-dot), .account-enrollment-card .ui-button { min-height: 30px; font-size: 12px; }
+.workspace-setup .ui-button-icon-sm { width: 28px; height: 28px; min-height: 28px; padding: 0; }
+.setup-selection-summary { align-items: center; }
+.setup-selection-tools { display: flex; align-items: center; gap: 6px; }
+.enrollment-choices .enrollment-choice { min-height: 56px; padding: 10px; gap: 10px; }
+.enrollment-back { min-height: 30px; }
+.account-enrollment-card .enrollment-login summary { min-height: 30px; }
+.setup-page-add-account > h2, .setup-page-add-account > .workspace-intro { text-align: center; }
+.setup-page { animation: setup-page-enter 200ms cubic-bezier(.23, 1, .32, 1) both; }
+@keyframes setup-page-enter { from { opacity: 0; transform: translateX(var(--page-offset, 12px)); } to { opacity: 1; transform: translateX(0); } }
+.ak-dialog[data-state="open"] { animation: panel-modal-enter 200ms cubic-bezier(.23, 1, .32, 1) both; }
+.ak-dialog[data-state="closed"] { animation: panel-modal-exit 160ms ease-out both; }
+.ak-backdrop[data-state="open"] { animation: panel-overlay-enter 200ms ease-out both; }
+.ak-backdrop[data-state="closed"] { animation: panel-overlay-exit 160ms ease-out both; }
+@keyframes panel-modal-enter { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes panel-modal-exit { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(8px); } }
+@keyframes panel-overlay-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes panel-overlay-exit { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .setup-page { animation: none; } }
+
+/* Center the optional account invitation as one group, with room to scroll additions. */
+.workspace-setup-scroll.is-add-account { display: flex; flex-direction: column; }
+.is-add-account > .setup-page-add-account { flex-shrink: 0; margin-top: auto; }
+.is-add-account > div:last-child { flex-shrink: 0; margin-bottom: auto; }
+.setup-page-add-account > .workspace-intro { margin-inline: auto; max-width: 34ch; }
+.enrollment-overview { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.enrollment-added-list { width: 100%; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+
+/* Provider totals and account metadata share one visual rhythm. */
+.provider-group-title .provider-count { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 20px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--raised); color: var(--fg); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.workspace-account-list { display: flex; flex-direction: column; gap: 8px; padding: 0; border: 0; background: transparent; }
+.workspace-account { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-m); background: var(--card); }
+.workspace-account + .workspace-account { border-top-color: var(--line); }
+.workspace-account-mark { height: 40px; }
+.workspace-account-info { flex-basis: 100px; }
+/* All home-page providers use the same compact account actions. */
+:is(.workspace-account-actions, .cli-head) .ui-button,
+.enrollment-saved-row > .ui-button {
+  height: 33px;
+  min-height: 33px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+:is(.workspace-account-actions, .cli-head) .ui-button:is(.ui-button-icon, .ui-button-icon-sm) {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
+.enrollment-overview > .account-enrollment { width: 100%; }
+
+/* Destructive text actions share the wizard Next button's compact size. */
+.ui-button:is(.ui-button-destructive, .danger):not(.ui-button-icon, .ui-button-icon-sm),
+:is(.workspace-remove, .profile-remove) .ui-button {
+  width: fit-content;
+  height: 33px;
+  min-height: 33px;
+  padding: 0 12px;
+  font-size: 12px;
+  align-self: flex-start;
+}
+
+/* Keep the provider back button's hover inside its padded hit area. */
+.ui-button.enrollment-back { align-self: flex-start; width: auto; min-height: 36px; padding: 8px 10px; border-radius: var(--radius-s); justify-content: flex-start; }
+.ui-button.enrollment-back:hover:enabled { background: var(--control-hover); color: var(--fg); }
+.workspace-manage-item { display: flex; align-items: center; gap: 4px; }
+.workspace-manage-item .workspace-manage-row { flex: 1; min-width: 0; }
+.workspace-manage-item > .ui-button { flex-shrink: 0; }
+
+/* One provider identity in the group header; account cards prioritize people. */
+.provider-group-title { display: flex; align-items: center; gap: 7px; }
+.provider-group-title > .plogo { display: inline-flex; width: 18px; height: 18px; flex-shrink: 0; }
+.provider-group-title > .plogo svg { width: 18px; height: 18px; }
+
+.account-card { padding: 12px; border-radius: 10px; }
+.account-card.is-active { border-color: color-mix(in srgb, var(--accent) 22%, var(--line)); }
+.account-card .workspace-account-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.account-card .workspace-account-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.account-card .workspace-account-title { display: flex; align-items: center; flex-wrap: nowrap; justify-content: flex-start; gap: 6px; min-width: 0; }
+.account-card .workspace-account-title .row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 20px; font-weight: 600; }
+.account-card .workspace-account-title .plan-badge { flex-shrink: 0; font-size: 10px; padding: 1px 5px; border: 1px solid var(--inset-line); border-radius: 4px; background: var(--inset); line-height: 15px; }
+.account-card .workspace-active-badge { flex-shrink: 0; margin-left: 2px; font-size: 10px; }
+.account-card .workspace-account-email { margin: 0; font-size: 11px; line-height: 17px; min-width: 0; }
+.account-card .workspace-account-actions { align-self: center; margin: 0 -6px 0 0; }
+.account-card .workspace-account-actions .ui-button:is(.ui-button-icon, .ui-button-icon-sm) { width: 44px; height: 44px; min-height: 44px; }
+.account-card .account-switch-action { color: var(--accent-hover); font-weight: 500; padding-inline: 7px; min-height: 44px; height: 44px; }
+.account-card .workspace-account-title .workspace-account-plan { margin: 0; }
+
+/* Capacity warning: account identity, reset timing, then one clear decision. */
+.ak-dialog.limit-switch-card { max-width: 378px; padding: 20px; border-radius: 16px; }
+.limit-switch-card .modal-head { justify-content: flex-start; min-height: 28px; padding: 0 32px 0 0; margin-bottom: 18px; }
+.limit-switch-card .modal-head .ak-heading { text-align: left; font-size: 15px; }
+.limit-switch-card .app-modal-body { padding: 0; scrollbar-gutter: auto; }
+.limit-switch-content { display: flex; flex-direction: column; gap: 16px; }
+.limit-switch-account { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.limit-switch-symbol { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0; background: color-mix(in srgb, var(--notice) 10%, transparent); color: var(--notice); }
+.limit-switch-account > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.limit-switch-account strong { font-size: 14px; font-weight: 600; color: var(--fg); overflow-wrap: anywhere; }
+.limit-switch-account > div > span { font-size: 11px; color: var(--muted); overflow-wrap: anywhere; user-select: text; }
+.limit-switch-copy { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+.limit-switch-reset { display: flex; align-items: center; gap: 8px; padding: 11px 12px; border: 1px solid var(--inset-line); border-radius: 8px; background: var(--inset); color: var(--fg); font-size: 12px; font-variant-numeric: tabular-nums; }
+.limit-switch-reset svg { flex-shrink: 0; color: var(--muted); }
+.limit-switch-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 2px; }
+.limit-switch-actions .ui-button { width: 100%; min-height: 40px; padding: 8px 12px; font-size: 12px; border-radius: 8px; }
+.limit-switch-error { margin: 0; font-size: 12px; line-height: 1.5; color: var(--danger); overflow-wrap: anywhere; }
+
+.workspace-manage-item > .workspace-manage-row { display: flex; padding: 12px 0; text-align: left; }
+.workspace-manage-item + .workspace-manage-item { border-top: 1px solid var(--inset-line); }
+
+/* Account actions float above the unchanged workspace account list. */
+.ak-dialog.workspace-action-popup { max-width: 354px; padding: 20px; border-radius: 14px; }
+.workspace-action-popup .app-modal-body { padding: 0; scrollbar-gutter: auto; }
+.workspace-action-popup .modal-head { justify-content: flex-start; padding-left: 0; margin-bottom: 14px; }
+.workspace-action-popup .modal-head .ak-heading { text-align: left; }
+.workspace-action-copy { margin: 0 0 20px; font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
+.workspace-action-copy strong { color: var(--fg); font-weight: 600; }
+.workspace-action-buttons, .workspace-action-popup .workspace-form-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.workspace-action-popup .workspace-action-buttons .ui-button, .workspace-action-popup .workspace-form-actions .ui-button { width: 100%; min-height: 40px; height: auto; padding: 8px 10px; font-size: 12px; border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-action-popup[data-state], .ak-backdrop[data-state] { animation: none; }
+}
+
+.workspace-action-overlay { z-index: 202; }
+.ak-dialog.workspace-action-popup { z-index: 203; }
+.discard-confirm-overlay { z-index: 204; }
+.ak-dialog.discard-confirm { z-index: 205; }
+
+/* Account popups keep their graphite surface even over a light workspace. */
+.ak-dialog.workspace-action-popup {
+  color-scheme: dark;
+  --bg: #191b1f; --card: #23262b; --raised: #30353d; --raised-dark: #202328;
+  --inset: #1e2126; --inset-line: rgba(255, 255, 255, .07);
+  --fg: #f1f3f5; --title: #fff; --muted: #a8b0bd; --line: #383e47;
+  --control-hover: rgba(255, 255, 255, .06); --control-pressed: rgba(255, 255, 255, .1);
+  --control-hover-fill: #343941; --control-pressed-fill: #3b414a;
+  background: var(--card); color: var(--fg); border-color: var(--line);
+}
+.workspace-action-overlay { background: rgba(0, 0, 0, .66); }
+
+/* Workspace percentage controls stay compact. */
+.workspace-percent-control { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; color: var(--muted); }
+.workspace-settings-card .workspace-percent-control input { width: 58px; min-width: 0; height: 32px; min-height: 32px; padding: 5px 7px; text-align: center; border-radius: 7px; font-variant-numeric: tabular-nums; }
+
+
+.workspace-menu-bar .settings-group + .settings-group { margin-top: 10px; }
+
+/* A reset belongs to the provider, with less weight than an account card. */
+.workspace-accounts > .codex-reset-notice { padding: 8px 12px; }
+.workspace-accounts > .codex-reset-notice .codex-reset-close { min-height: 24px; height: 24px; width: 24px; }
+
+/* Color levels belong to the menu-bar master, separate from notifications. */
+.workspace-limit-colors { margin-top: 10px; }
+.workspace-color-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; margin-right: 10px; }
+.workspace-color-dot.is-early { background: #30b86b; }
+.workspace-color-dot.is-warning { background: var(--warning-threshold); }
+.workspace-color-dot.is-high { background: #ff9f0a; }
+.workspace-color-dot.is-critical { background: #ff453a; }
+.workspace-color-threshold-form { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.workspace-color-threshold-form > label { flex: 1; color: var(--muted); font-size: 12px; }
+.workspace-color-threshold-form .ui-button { min-height: 32px; height: 32px; padding: 0 10px; }

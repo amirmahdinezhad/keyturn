@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 
 const { mockQuotas } = vi.hoisted(() => ({ mockQuotas: vi.fn() }));
 
-vi.mock("../api", () => ({ cliQuotas: mockQuotas }));
+vi.mock("../api", () => ({ cliQuotas: mockQuotas, claudeProfileQuota: () => mockQuotas().then((sets: QuotaSet[]) => sets.find((s) => s.provider === "claude") ?? { provider: "claude", error: "Claude returned no subscription usage windows for this account." }) }));
 
 import { UsageModal } from "./UsageModal";
 import type { ProviderCliStatus } from "../api";
+import type { QuotaSet } from "../api";
 
 const notify = vi.fn();
 
@@ -49,6 +50,20 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("UsageModal", () => {
+  it("keeps the latest 17% response when an older 18% request finishes later", async () => {
+    let finishOld!: (sets: QuotaSet[]) => void;
+    mockQuotas.mockReturnValueOnce(new Promise<QuotaSet[]>((resolve) => { finishOld = resolve; }));
+    const account = status({ id: "codex", label: "Codex" });
+    const props = { status: account, showRemaining: true, onClose: () => {}, notify };
+    const view = render(<UsageModal {...props} refreshKey={0} />);
+    mockQuotas.mockResolvedValue([{ provider: "codex", windows: [{ window: "5-hour", percent: 83 }] }]);
+    view.rerender(<UsageModal {...props} refreshKey={1} />);
+    expect(await screen.findByText("17%")).toBeInTheDocument();
+    await act(async () => { finishOld([{ provider: "codex", windows: [{ window: "5-hour", percent: 82 }] }]); });
+    expect(screen.getByText("17%")).toBeInTheDocument();
+    expect(screen.queryByText("18%")).not.toBeInTheDocument();
+  });
+
   it("renders nothing when closed", () => {
     const { container } = render(
       <UsageModal status={null} showRemaining={false} onClose={() => {}} notify={notify} />,
@@ -119,11 +134,11 @@ describe("UsageModal", () => {
     expect(screen.getByText("Updated 3h ago")).toBeInTheDocument();
   });
 
-  it("says so when Claude never reported usage", async () => {
+  it("shows a specific Claude usage failure", async () => {
     mockQuotas.mockResolvedValue([]);
     renderModal({ id: "claude", label: "Claude" });
 
-    expect(await screen.findByText(/No snapshots yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/no subscription usage windows/)).toBeInTheDocument();
   });
 
   it("shows Codex windows from the quota endpoint", async () => {
@@ -137,10 +152,31 @@ describe("UsageModal", () => {
         error: null,
       },
     ]);
-    renderModal({ id: "codex", label: "OpenAI Codex" });
+    renderModal({ id: "codex", label: "Codex" });
 
     expect(await screen.findByText("Weekly")).toBeInTheDocument();
-    expect(screen.getByText("10%")).toBeInTheDocument();
+    expect(screen.getByText("90%")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Weekly usage" })).toHaveAttribute("aria-valuenow", "90");
     expect(screen.queryByText("gpt-reserve")).not.toBeInTheDocument();
+  });
+
+  it.each([[93.5, 7], [93.51, 6], [99.5, 1], [100, 0], [0, 100]])(
+    "matches Codex rounding for %s%% used",
+    async (percent, remaining) => {
+      mockQuotas.mockResolvedValue([{ provider: "codex", windows: [{ window: "5-hour", percent }] }]);
+      renderModal({ id: "codex", label: "Codex" });
+      expect(await screen.findByText(`${remaining}%`)).toBeInTheDocument();
+      expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", String(remaining));
+    },
+  );
+
+  it("keeps the neutral time marker without an elapsed-time description below the bar", async () => {
+    mockQuotas.mockResolvedValue([{ provider: "codex", windows: [{
+      window: "5-hour", percent: 80, resetsAt: new Date(Date.now() + 9_000_000).toISOString(),
+    }] }]);
+    renderModal({ id: "codex", label: "Codex" });
+    expect(await screen.findByText("20%")).toBeInTheDocument();
+    expect(screen.queryByText(/of period elapsed/)).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /50% of 5-hour period elapsed/ })).toHaveStyle({ background: "var(--muted)" });
   });
 });

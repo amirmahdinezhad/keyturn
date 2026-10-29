@@ -90,7 +90,7 @@ fn app_settings_keys_are_camel_case_for_the_ui() {
 
     let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
     keys.sort_unstable();
-    let mut expected = ["refreshIntervalSecs", "usageShowRemaining"];
+    let mut expected = ["refreshIntervalSecs", "usageShowRemaining", "menuBarEnabled", "menuBarProvider", "menuBarWindow", "providerAccents", "usageAppearance", "multiProfile", "autoSwitchEnabled", "codexAccounts", "codexDisplayMode", "codexReset", "workspaceVersion", "activeWorkspaceId", "workspaces"];
     expected.sort_unstable();
     assert_eq!(keys, expected, "AppSettings field names are the IPC contract");
 }
@@ -129,6 +129,7 @@ fn cli_status_serializes_to_the_frontend_contract() {
         install_url: "https://claude.com/product/claude-code".into(),
         auth_file: None,
         connected: Vec::new(),
+        subscriptions: Vec::new(),
     };
     let value = serde_json::to_value(&status).expect("serialize");
     let obj = value.as_object().expect("status is an object");

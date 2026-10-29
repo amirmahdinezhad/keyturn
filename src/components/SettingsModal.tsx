@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Button } from "./ui/button";
 import { Switch } from "./ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -12,9 +12,8 @@ import {
 import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 import { prettyError, setAppSettings, setSettings } from "../api";
-import type { AppSettings, AppState } from "../types";
+import { DEFAULT_APP_SETTINGS, type AppSettings, type AppState } from "../types";
 import {
-  ACCENT_PRESETS,
   applyDisplayPrefs,
   DEFAULT_DISPLAY_PREFS,
   loadDisplayPrefs,
@@ -59,15 +58,14 @@ interface SettingsModalProps {
   onDisplayChanged?: (d: DisplayPrefs) => void;
 }
 
-type SettingsTab = "general" | "display" | "updates";
+type SettingsTab = "general" | "updates";
 const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
-  { id: "display", label: "Display" },
   { id: "updates", label: "Updates" },
 ];
 
 /**
- * Compact settings groups with an iOS-style sliding segment indicator.
+ * Global behavior, theme and updates; account usage and alerts remain workspace-scoped.
  * General owns the single reset action; Updates shows one primary action
  * for the current phase, while keeping download and restart separate.
  */
@@ -85,11 +83,17 @@ export function SettingsModal({
   const [phase, setPhase] = useState<UpdatePhase>({ kind: "idle" });
   const [currentVersion, setCurrentVersion] = useState<string | null>(null);
   const [tab, setTab] = useState<SettingsTab>("general");
-  const [direction, setDirection] = useState(1);
+  const updateBusy = useRef(false);
+  const lastAttempt = useRef(0);
   const [keyboardNavigation, setKeyboardNavigation] = useState(false);
   const [displayState, setDisplayState] = useState<DisplayPrefs>(
     () => displayProp ?? loadDisplayPrefs(),
   );
+
+  useLayoutEffect(() => {
+    const body = document.getElementById("settings-body");
+    if (body) body.scrollTop = 0;
+  }, [tab]);
 
   const display = displayProp ?? displayState;
   const setDisplay = useCallback(
@@ -109,7 +113,6 @@ export function SettingsModal({
   useEffect(() => {
     if (!open) return;
     setTab("general");
-    setPhase({ kind: "idle" });
     getVersion()
       .then((v) => setCurrentVersion(v))
       .catch(() => setCurrentVersion(null));
@@ -117,12 +120,14 @@ export function SettingsModal({
 
   const updatePrefs = useCallback(
     async (partial: Partial<AppSettings>) => {
-      if (busy) return;
+      if (busy) return false;
       setBusy(true);
       try {
         onChanged(await setAppSettings(partial));
+        return true;
       } catch (e) {
         notify(prettyError(e), "err");
+        return false;
       } finally {
         setBusy(false);
       }
@@ -141,37 +146,38 @@ export function SettingsModal({
     [notify, onChanged],
   );
 
-  const checkNow = useCallback(() => {
+  const checkNow = useCallback((automatic = false) => {
+    if (updateBusy.current) return;
+    updateBusy.current = true;
+    lastAttempt.current = Date.now();
     setPhase({ kind: "checking" });
-    void check()
-      .then((found) => {
-        if (!found || found.version === skippedVersion()) {
-          setPhase({ kind: "current" });
-          return;
-        }
-        setPhase({ kind: "available", update: found });
-        notify(`Version ${found.version} is available`, "ok");
-      })
-      .catch((e) => {
-        const message = prettyError(e);
-        setPhase({ kind: "failed", message });
-        notify(message, "err");
-      });
+    void check().then(async (found) => {
+      try { localStorage.setItem("keyturn.lastUpdateCheck", new Date().toISOString()); } catch { /* Optional history. */ }
+      if (!found || (automatic && found.version === skippedVersion())) { setPhase({ kind: "current" }); return; }
+      setPhase({ kind: "available", update: found });
+      notify(`Version ${found.version} is available`, "ok");
+      if (automatic) {
+        setPhase({ kind: "downloading", progress: null });
+        await downloadUpdate(found, (progress) => setPhase({ kind: "downloading", progress }));
+        setPhase({ kind: "downloaded", update: found });
+      }
+    }).catch((e) => {
+      const message = prettyError(e); setPhase({ kind: "failed", message }); notify(message, "err");
+    }).finally(() => { updateBusy.current = false; });
   }, [notify]);
 
-  // Optional auto-check when the Updates tab opens (off by default).
+  // This component remains mounted while Settings and the tray are closed.
   useEffect(() => {
-    if (
-      open &&
-      tab === "updates" &&
-      display.checkUpdatesOnLaunch &&
-      phase.kind === "idle"
-    ) {
-      checkNow();
-    }
-    // Only re-run when the tab opens; checkNow is stable enough.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, tab]);
+    if (!display.checkUpdatesOnLaunch) return;
+    const dailyCheck = () => {
+      if (updateBusy.current || phase.kind === "available" || phase.kind === "downloaded" || phase.kind === "installing") return;
+      let checked = 0;
+      try { checked = Date.parse(localStorage.getItem("keyturn.lastUpdateCheck") ?? "") || 0; } catch { /* Optional history. */ }
+      if (Date.now() - Math.max(checked, lastAttempt.current) >= 86_400_000) checkNow(true);
+    };
+    dailyCheck(); const timer = window.setInterval(dailyCheck, 60_000);
+    return () => window.clearInterval(timer);
+  }, [display.checkUpdatesOnLaunch, checkNow, phase.kind]);
 
   const skipVersion = useCallback(
     (version: string) => {
@@ -182,57 +188,31 @@ export function SettingsModal({
     [notify],
   );
 
-  const downloadOnly = useCallback(
-    (update: Update) => {
-      let total = 0;
-      let done = 0;
-      setPhase({ kind: "downloading", progress: null });
-      void update
-        .download((event: DownloadEvent) => {
-          if (event.event === "Started") {
-            total = event.data.contentLength ?? 0;
-            done = 0;
-          } else if (event.event === "Progress") {
-            done += event.data.chunkLength;
-          }
-          setPhase({
-            kind: "downloading",
-            progress: total > 0 ? Math.min(1, done / total) : null,
-          });
-        })
-        .then(() => {
-          setPhase({ kind: "downloaded", update });
-        })
-        .catch((e) => {
-          const message = prettyError(e);
-          setPhase({ kind: "failed", message });
-          notify(message, "err");
-        });
-    },
-    [notify],
-  );
+  const downloadOnly = useCallback((update: Update) => {
+    if (updateBusy.current) return;
+    updateBusy.current = true; setPhase({ kind: "downloading", progress: null });
+    void downloadUpdate(update, (progress) => setPhase({ kind: "downloading", progress }))
+      .then(() => setPhase({ kind: "downloaded", update }))
+      .catch((e) => { const message = prettyError(e); setPhase({ kind: "failed", message }); notify(message, "err"); })
+      .finally(() => { updateBusy.current = false; });
+  }, [notify]);
 
-  const installAndRelaunch = useCallback(
-    (update: Update) => {
-      void update
-        .install()
-        .then(() => relaunch())
-        .catch((e) => {
-          const message = prettyError(e);
-          setPhase({ kind: "failed", message });
-          notify(message, "err");
-        });
-    },
-    [notify],
-  );
+  const installAndRelaunch = useCallback((update: Update) => {
+    if (updateBusy.current) return;
+    updateBusy.current = true; setPhase({ kind: "installing" });
+    void update.install().then(() => relaunch())
+      .catch((e) => { const message = prettyError(e); setPhase({ kind: "failed", message }); notify(message, "err"); })
+      .finally(() => { updateBusy.current = false; });
+  }, [notify]);
 
   const resetAll = useCallback(() => {
-    setDisplay(resetDisplayPrefs());
-    setDisplayState({ ...DEFAULT_DISPLAY_PREFS });
-    void updatePrefs({
-      refreshIntervalSecs: 60,
-      usageShowRemaining: false,
-    }).then(() => notify("Settings reset to defaults", "ok"));
+    // Reset global preferences without replacing workspace membership or policies.
+    void updatePrefs({ refreshIntervalSecs: DEFAULT_APP_SETTINGS.refreshIntervalSecs,
+      usageShowRemaining: DEFAULT_APP_SETTINGS.usageShowRemaining }).then((saved) => {
+      if (!saved) return;
+      setDisplay(resetDisplayPrefs()); setDisplayState({ ...DEFAULT_DISPLAY_PREFS });
+      notify("Settings reset to defaults", "ok");
+    });
   }, [notify, setDisplay, updatePrefs]);
 
   return (
@@ -240,12 +220,6 @@ export function SettingsModal({
       value={tab}
       onValueChange={(value) => {
         const next = value as SettingsTab;
-        setDirection(
-          SETTINGS_TABS.findIndex((item) => item.id === next) >=
-            SETTINGS_TABS.findIndex((item) => item.id === tab)
-            ? 1
-            : -1,
-        );
         setTab(next);
       }}
       className="settings-tabs-root"
@@ -253,7 +227,7 @@ export function SettingsModal({
       <AppModal
         open={open}
         onClose={onClose}
-        title="Settings"
+        title="Global settings"
         cardClass="settings-card"
         bodyId="settings-body"
         navigation={
@@ -262,7 +236,7 @@ export function SettingsModal({
               className="settings-tabs ios-segments"
               aria-label="Settings sections"
               style={segmentStyle(
-                3,
+                SETTINGS_TABS.length,
                 SETTINGS_TABS.findIndex((item) => item.id === tab),
                 keyboardNavigation,
               )}
@@ -283,7 +257,6 @@ export function SettingsModal({
         ) : (
           <div
             className={`settings-body${keyboardNavigation ? " no-motion" : ""}`}
-            style={{ "--panel-direction": direction } as CSSProperties}
           >
             <TabsContent value="general" className="settings-panel settings-general">
               <section
@@ -319,19 +292,6 @@ export function SettingsModal({
               <p className="setting-note">
                 Checks connected CLIs while the panel is open.
               </p>
-              <div className="settings-footer">
-                <Button
-                  type="button"
-                  className="link-btn reset-settings"
-                  disabled={busy}
-                  onClick={resetAll}
-                >
-                  Reset to defaults
-                </Button>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="display" className="settings-panel">
               <section
                 className="settings-section settings-group"
                 aria-label="Appearance"
@@ -368,82 +328,17 @@ export function SettingsModal({
                     )}
                   </ToggleGroup>
                 </Row>
-                <Row name="Accent">
-                  <div
-                    className="accent-grid"
-                    role="group"
-                    aria-label="Accent color"
-                  >
-                    {ACCENT_PRESETS.map((preset) => (
-                      <Button
-                        key={preset.value}
-                        type="button"
-                        title={`${preset.name} — ${preset.hint}`}
-                        aria-label={`Accent ${preset.name}`}
-                        aria-pressed={display.accent === preset.value}
-                        className={`accent-dot${display.accent === preset.value ? " on" : ""}`}
-                        style={{ "--dot": preset.value } as CSSProperties}
-                        onClick={() =>
-                          setDisplay({ ...display, accent: preset.value })
-                        }
-                      >
-                        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                          <path
-                            d="m4 8 2.5 2.5L12 5"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                      </Button>
-                    ))}
-                  </div>
-                </Row>
               </section>
-
-              <section
-                className="settings-section settings-group"
-                aria-label="Provider list"
-              >
-                <Row name="Quota reads as">
-                  <ToggleGroup
-                    type="single"
-                    className="segmented ios-segments quota-segments"
-                    style={segmentStyle(2, app.usageShowRemaining ? 1 : 0)}
-                    aria-label="Quota wording"
-                    value={app.usageShowRemaining ? "left" : "used"}
-                    disabled={busy}
-                    onValueChange={(wording) => {
-                      if (wording)
-                        void updatePrefs({
-                          usageShowRemaining: wording === "left",
-                        });
-                    }}
-                  >
-                    <ToggleGroupItem value="used" className="segment">
-                      Used
-                    </ToggleGroupItem>
-                    <ToggleGroupItem value="left" className="segment">
-                      Left
-                    </ToggleGroupItem>
-                  </ToggleGroup>
-                </Row>
-                <Row name="Technical details">
-                  <Toggle
-                    label="Technical details"
-                    selected={display.showDetails}
-                    onChange={(v) => setDisplay({ ...display, showDetails: v })}
-                  />
-                </Row>
-                <Row name="Compact rows">
-                  <Toggle
-                    label="Compact rows"
-                    selected={display.compactRows}
-                    onChange={(v) => setDisplay({ ...display, compactRows: v })}
-                  />
-                </Row>
-              </section>
+              <div className="settings-footer">
+                <Button
+                  type="button"
+                  className="link-btn reset-settings"
+                  disabled={busy}
+                  onClick={resetAll}
+                >
+                  Reset to defaults
+                </Button>
+              </div>
             </TabsContent>
 
             <TabsContent value="updates" className="settings-panel">
@@ -451,16 +346,16 @@ export function SettingsModal({
                 <UpdateRows
                   phase={phase}
                   currentVersion={currentVersion}
-                  onCheck={checkNow}
+                  onCheck={() => checkNow()}
                   onSkip={skipVersion}
                   onDownload={downloadOnly}
                   onInstallRelaunch={installAndRelaunch}
                 />
               </section>
               <section className="settings-section settings-group">
-                <Row name="Check on open">
+                <Row name="Automatic updates">
                   <Toggle
-                    label="Check on open"
+                    label="Automatic updates"
                     selected={display.checkUpdatesOnLaunch}
                     onChange={(v) =>
                       setDisplay({ ...display, checkUpdatesOnLaunch: v })
@@ -469,7 +364,7 @@ export function SettingsModal({
                 </Row>
               </section>
               <p className="setting-note updates-note">
-                Checks automatically when you open this tab.
+                Checks and downloads once a day, including while Settings is closed. Installation waits for you.
               </p>
             </TabsContent>
           </div>
@@ -479,6 +374,16 @@ export function SettingsModal({
   );
 }
 
+/** Shared progress accounting for manual and automatic downloads. */
+async function downloadUpdate(update: Update, onProgress: (progress: number | null) => void) {
+  let total = 0, done = 0;
+  await update.download((event: DownloadEvent) => {
+    if (event.event === "Started") { total = event.data.contentLength ?? 0; done = 0; }
+    if (event.event === "Progress") done += event.data.chunkLength;
+    onProgress(total > 0 ? Math.min(1, done / total) : null);
+  });
+}
+
 type UpdatePhase =
   | { kind: "idle" }
   | { kind: "checking" }
@@ -486,6 +391,7 @@ type UpdatePhase =
   | { kind: "available"; update: Update }
   | { kind: "downloading"; progress: number | null }
   | { kind: "downloaded"; update: Update }
+  | { kind: "installing" }
   | { kind: "failed"; message: string };
 
 function UpdateRows({
@@ -504,7 +410,7 @@ function UpdateRows({
   onInstallRelaunch: (update: Update) => void;
 }) {
   const message =
-    phase.kind === "checking"
+    phase.kind === "installing" ? "Installing update…" : phase.kind === "checking"
       ? "Checking for updates…"
       : phase.kind === "current"
         ? "You're on the latest version."
@@ -534,11 +440,17 @@ function UpdateRows({
         aria-live="polite"
       >
         {phase.kind === "current" ? <TickIcon size={20} /> : null}
-        {phase.kind === "checking" || phase.kind === "downloading" ? (
+        {phase.kind === "checking" || phase.kind === "downloading" || phase.kind === "installing" ? (
           <SpinnerIcon size={18} />
         ) : null}
         <span>{message}</span>
       </div>
+      {(phase.kind === "available" || phase.kind === "downloaded") && phase.update.body ? (
+        <details className="update-release-notes">
+          <summary>What's new</summary>
+          <p className="setting-note release-notes">{phase.update.body}</p>
+        </details>
+      ) : null}
       {phase.kind === "downloading" ? (
         <>
           <Progress
@@ -554,12 +466,6 @@ function UpdateRows({
         </>
       ) : phase.kind === "available" ? (
         <>
-          {phase.update.body ? (
-            <details className="update-release-notes">
-              <summary>What's new</summary>
-              <p className="setting-note release-notes">{phase.update.body}</p>
-            </details>
-          ) : null}
           <Button
             className="primary update-primary"
             onClick={() => onDownload(phase.update)}
@@ -584,9 +490,9 @@ function UpdateRows({
         <Button
           className="update-primary"
           onClick={onCheck}
-          disabled={phase.kind === "checking"}
+          disabled={phase.kind === "checking" || phase.kind === "installing"}
         >
-          {phase.kind === "checking" ? "Checking…" : "Check now"}
+          {phase.kind === "installing" ? "Installing…" : phase.kind === "checking" ? "Checking…" : "Check for updates"}
         </Button>
       )}
     </div>

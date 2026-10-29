@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 
@@ -12,7 +12,7 @@ const onClose = vi.fn();
 function candidate(over: Partial<ProviderCliStatus> = {}): ProviderCliStatus {
   return {
     id: "codex",
-    label: "OpenAI Codex",
+    label: "Codex",
     binary: "codex",
     binaryFound: false,
     binaryPath: null,
@@ -52,6 +52,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AddAccountModal", () => {
+  it("ignores an old installation check after returning and choosing another provider", async () => {
+    const user = userEvent.setup();
+    let finish!: (statuses: ProviderCliStatus[]) => void;
+    renderModal({ candidates: [candidate(), candidate({ id: "gemini", label: "Gemini", binary: "gemini", binaryFound: true, loginCmd: "gemini" })], onRefresh: () => new Promise(resolve => { finish = resolve; }) });
+    await user.click(screen.getByText("Codex", { selector: ".row-title" }).closest("button")!);
+    await user.click(screen.getByRole("button", { name: "Check installation" }));
+    await user.click(screen.getByRole("button", { name: "All providers" }));
+    await user.click(screen.getByText("Gemini", { selector: ".row-title" }).closest("button")!);
+    await act(async () => finish([candidate({ binaryFound: true })]));
+    expect(screen.getByText("gemini", { selector: "code" })).toBeInTheDocument();
+    expect(screen.queryByText("codex login", { selector: "code" })).not.toBeInTheDocument();
+  });
   it("renders nothing when closed", () => {
     const { container } = render(
       <AddAccountModal
@@ -70,10 +82,10 @@ describe("AddAccountModal", () => {
     renderModal();
 
     expect(screen.queryByLabelText("Setup progress")).not.toBeInTheDocument();
-    expect(screen.getByText("OpenAI Codex")).toBeInTheDocument();
+    expect(screen.getByText("Codex")).toBeInTheDocument();
     expect(screen.getByText("Not installed")).toBeInTheDocument();
 
-    await user.click(screen.getByText("OpenAI Codex").closest("button")!);
+    await user.click(screen.getByText("Codex").closest("button")!);
 
     expect(screen.getByLabelText("Setup progress")).toBeInTheDocument();
 
@@ -87,7 +99,7 @@ describe("AddAccountModal", () => {
     const user = userEvent.setup();
     const installed = candidate({ binaryFound: true, binaryPath: "/usr/local/bin/codex" });
     renderModal({ onRefresh: async () => [installed] });
-    await user.click(screen.getByText("OpenAI Codex").closest("button")!);
+    await user.click(screen.getByText("Codex").closest("button")!);
 
     await user.click(screen.getByRole("button", { name: "Check installation" }));
 
@@ -104,7 +116,7 @@ describe("AddAccountModal", () => {
     const user = userEvent.setup();
     renderModal({ onRefresh: async () => [candidate()] });
 
-    await user.click(screen.getByText("OpenAI Codex").closest("button")!);
+    await user.click(screen.getByText("Codex").closest("button")!);
     await user.click(screen.getByRole("button", { name: "Check installation" }));
 
     expect(await screen.findByText(/still not found/)).toBeInTheDocument();
@@ -118,10 +130,22 @@ describe("AddAccountModal", () => {
       candidates: [candidate({ binaryFound: true, binaryPath: "/usr/local/bin/codex" })],
     });
 
-    await user.click(screen.getByText("OpenAI Codex").closest("button")!);
+    await user.click(screen.getByText("Codex").closest("button")!);
 
     expect(screen.queryByText("curl -fsSL https://chatgpt.com/codex/install.sh | sh")).not.toBeInTheDocument();
     expect(screen.getByText("codex login")).toBeInTheDocument();
+  });
+
+  it("does not report a connection until workspace membership is saved", async () => {
+    const user = userEvent.setup();
+    const onConnected = vi.fn().mockRejectedValueOnce(new Error("Cannot save workspace"));
+    renderModal({ candidates: [candidate({ binaryFound: true })], onRefresh: async () => [candidate({ binaryFound: true, loggedIn: true })], onConnected });
+    await user.click(screen.getByText("Codex").closest("button")!);
+    await user.click(screen.getByRole("button", { name: "I've signed in — check" }));
+    expect(await screen.findByText("Couldn't re-check — try again.")).toBeInTheDocument();
+    expect(onConnected).toHaveBeenCalledWith("codex");
+    expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
+    expect(notify).not.toHaveBeenCalledWith("Codex connected", "ok");
   });
 
   it("finishes with a Done pane once the account verifies", async () => {
@@ -132,14 +156,15 @@ describe("AddAccountModal", () => {
       onRefresh: async () => [loggedIn],
     });
 
-    await user.click(screen.getByText("OpenAI Codex").closest("button")!);
+    await user.click(screen.getByText("Codex").closest("button")!);
     await user.click(screen.getByRole("button", { name: "I've signed in — check" }));
 
     expect(await screen.findByRole("button", { name: "Done" })).toBeInTheDocument();
-    expect(notify).toHaveBeenCalledWith("OpenAI Codex connected", "ok");
+    expect(notify).toHaveBeenCalledWith("Codex connected", "ok");
     // Once configured, the sign-in command + Copy button are gone.
     expect(screen.queryByText("codex login")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "All providers" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Done" }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
@@ -151,7 +176,7 @@ describe("AddAccountModal", () => {
       onRefresh: async () => [candidate({ binaryFound: true })],
     });
 
-    await user.click(screen.getByText("OpenAI Codex").closest("button")!);
+    await user.click(screen.getByText("Codex").closest("button")!);
     await user.click(screen.getByRole("button", { name: "I've signed in — check" }));
 
     expect(await screen.findByText(/Still not signed in/)).toBeInTheDocument();

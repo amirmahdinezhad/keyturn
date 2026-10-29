@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
   applyDisplayPrefs,
+  accentStyle,
   DEFAULT_DISPLAY_PREFS,
   DISPLAY_PREFS_KEY,
   loadDisplayPrefs,
@@ -60,5 +61,16 @@ describe("displayPrefs", () => {
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#2f9e6e");
     expect(document.documentElement.style.getPropertyValue("--accent-hover")).not.toBe("");
     expect(document.documentElement.style.getPropertyValue("--accent-bg")).toContain("rgba(");
+  });
+
+  it.each(["#007aff", "#2f9e6e", "#ffff00", "#ffffff", "#000000"])("keeps white action labels readable for %s without changing identity", (accent) => {
+    const colors = accentStyle(accent);
+    expect(colors["--accent"]).toBe(accent);
+    for (const key of ["--accent-action", "--accent-action-hover"]) {
+      const rgb = colors[key].slice(1).match(/.{2}/g)!.map((value) => parseInt(value, 16) / 255);
+      const channels = rgb.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+      const luminance = channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+      expect(1.05 / (luminance + 0.05)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
