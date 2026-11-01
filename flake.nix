@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs { inherit system; };
-        version = "1.0.0";
+        version = "1.1.0";
         src = self;
       in
       {

@@ -694,6 +694,20 @@ pub fn quota_for(id: &str) -> Option<crate::quota::QuotaSet> {
     Repository::system().profile_quota_with(id, crate::codex_refresh::refresh, crate::quota::codex_quota_from_auth)
 }
 
+/// Pin a saved identity through reset review/redemption, including inactive accounts.
+/// The same profile lock protects credential renewal and account replacement.
+pub(crate) fn with_reset_account<T>(id: &str, action: impl FnOnce(&Value, &str, crate::quota::QuotaSet) -> Result<T, String>) -> Result<T, String> {
+    use sha2::{Digest, Sha256};
+    let _guard = LOCK.lock().map_err(|_| "Profile storage is busy. Try again.")?;
+    let repo = Repository::system();
+    let quota = repo.profile_quota_with(id, crate::codex_refresh::refresh, crate::quota::codex_quota_from_auth)
+        .ok_or("No usage data for this account. Reconnect and try again.")?;
+    if let Some(error) = &quota.error { return Err(error.clone()); }
+    let login = repo.profile_login_for_quota(id)?;
+    let identity = format!("{:x}", Sha256::digest(serde_json::to_vec(&(&login.identity.subject, &login.identity.account)).map_err(|_| "Cannot identify this account.")?));
+    action(&login.raw, &identity, quota)
+}
+
 fn needs_quota_renewal(quota: &crate::quota::QuotaSet) -> bool {
     quota.error.as_deref().is_some_and(|e| e.starts_with("session expired") || e.starts_with("session rejected"))
 }
@@ -821,7 +835,7 @@ mod tests {
             |raw| {
                 assert_eq!(raw["tokens"]["access_token"], "rejected-import");
                 Some(crate::quota::QuotaSet { provider: "codex".into(), windows: None,
-                    error: Some("session rejected — sign in again".into()), as_of: None })
+                    error: Some("session rejected — sign in again".into()), reset_credits: None, as_of: None })
             });
         assert!(result.unwrap_err().contains("reconnect this account"));
         assert_eq!(fs::read(f.repository.codex_home.join("auth.json")).unwrap(), before);
@@ -835,7 +849,7 @@ mod tests {
         f.connect(id, "work", "work-token");
         let before = fs::read(f.repository.codex_home.join("auth.json")).unwrap();
         for window in ["5-hour", "weekly"] {
-            let result = f.repository.check_switch_login_with(id, false, |_| panic!("valid login needs no renewal"), |_| Some(crate::quota::QuotaSet { provider: "codex".into(), error: None, as_of: None, windows: Some(vec![crate::quota::QuotaWindow { window: window.into(), percent: 100.0, resets_at: None, status: None }]) }));
+            let result = f.repository.check_switch_login_with(id, false, |_| panic!("valid login needs no renewal"), |_| Some(crate::quota::QuotaSet { provider: "codex".into(), error: None, reset_credits: None, as_of: None, windows: Some(vec![crate::quota::QuotaWindow { window: window.into(), percent: 100.0, resets_at: None, status: None }]) }));
             assert!(result.unwrap_err().contains("no remaining capacity"));
             assert_eq!(fs::read(f.repository.codex_home.join("auth.json")).unwrap(), before);
         }
@@ -847,10 +861,10 @@ mod tests {
         let state = f.repository.create("Work", false).unwrap(); let id = &state.profiles[0].id;
         f.connect(id, "work", "work-token");
         let before = fs::read(f.repository.codex_home.join("auth.json")).unwrap();
-        let exhausted = |_: &Value| Some(crate::quota::QuotaSet { provider: "codex".into(), error: None, as_of: None, windows: Some(vec![crate::quota::QuotaWindow { window: "weekly".into(), percent: 100.0, resets_at: None, status: None }]) });
+        let exhausted = |_: &Value| Some(crate::quota::QuotaSet { provider: "codex".into(), error: None, reset_credits: None, as_of: None, windows: Some(vec![crate::quota::QuotaWindow { window: "weekly".into(), percent: 100.0, resets_at: None, status: None }]) });
         assert!(f.repository.check_switch_login_with(id, true, |_| Ok(()), exhausted).is_ok());
         assert!(f.repository.check_switch_login_with(id, false, |_| Ok(()), exhausted).unwrap_err().contains("no remaining capacity"));
-        let error = f.repository.check_switch_login_with(id, true, |_| Ok(()), |_| Some(crate::quota::QuotaSet { provider: "codex".into(), error: Some("usage unavailable".into()), as_of: None, windows: None }));
+        let error = f.repository.check_switch_login_with(id, true, |_| Ok(()), |_| Some(crate::quota::QuotaSet { provider: "codex".into(), error: Some("usage unavailable".into()), reset_credits: None, as_of: None, windows: None }));
         assert!(error.unwrap_err().contains("usage unavailable"));
         assert_eq!(fs::read(f.repository.codex_home.join("auth.json")).unwrap(), before);
     }
@@ -866,7 +880,7 @@ mod tests {
         f.repository.check_switch_login_with(id, false,
             |home| write_private(&home.join("auth.json"), &login("work", "workspace", "renewed")),
             |raw| Some(crate::quota::QuotaSet { provider: "codex".into(), windows: Some(vec![]),
-                error: (raw["tokens"]["access_token"] != "renewed").then(|| "session expired".into()), as_of: None })
+                error: (raw["tokens"]["access_token"] != "renewed").then(|| "session expired".into()), reset_credits: None, as_of: None })
         ).unwrap();
         assert_eq!(fs::read(f.repository.codex_home.join("auth.json")).unwrap(), before);
         assert_eq!(f.repository.login(&f.repository.index().unwrap().profiles[0]).unwrap().unwrap().raw["tokens"]["access_token"], "renewed");
@@ -886,7 +900,7 @@ mod tests {
             write_private(&home.join("auth.json"), &login("work", "workspace", "renewed"))
         }, |raw| {
             if raw["tokens"]["access_token"] == "renewed" {
-                Some(crate::quota::QuotaSet { provider: "codex".into(), windows: Some(vec![crate::quota::QuotaWindow { window: "Weekly".into(), percent: 12.0, resets_at: None, status: None }]), error: None, as_of: None })
+                Some(crate::quota::QuotaSet { provider: "codex".into(), windows: Some(vec![crate::quota::QuotaWindow { window: "Weekly".into(), percent: 12.0, resets_at: None, status: None }]), error: None, reset_credits: None, as_of: None })
             } else { crate::quota::codex_quota_from_auth(raw) }
         }).unwrap();
         assert!(result.windows.is_some(), "expired saved accounts must recover usage: {:?}", result.error);
@@ -908,7 +922,7 @@ mod tests {
         }, |raw| {
             calls.set(calls.get() + 1);
             if raw["tokens"]["access_token"] == "renewed" {
-                Some(crate::quota::QuotaSet { provider: "codex".into(), windows: Some(vec![]), error: None, as_of: None })
+                Some(crate::quota::QuotaSet { provider: "codex".into(), windows: Some(vec![]), error: None, reset_credits: None, as_of: None })
             } else { crate::quota::codex_quota_from_auth(raw) }
         }).unwrap();
         assert!(result.error.is_none());
@@ -929,7 +943,7 @@ mod tests {
             let renewed = std::cell::Cell::new(false);
             let result = f.repository.profile_quota_with(id, |_| {
                 renewed.set(true); Err("reconnect this account".into())
-            }, |_| Some(crate::quota::QuotaSet { provider: "codex".into(), windows: None, error: Some(error.into()), as_of: None })).unwrap();
+            }, |_| Some(crate::quota::QuotaSet { provider: "codex".into(), windows: None, error: Some(error.into()), reset_credits: None, as_of: None })).unwrap();
             assert_eq!(renewed.get(), error.starts_with("session rejected"));
             assert_eq!(result.error.as_deref(), Some(if renewed.get() { "reconnect this account" } else { error }));
             assert_eq!(fs::read(&saved).unwrap(), before);

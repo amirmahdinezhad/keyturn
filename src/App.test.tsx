@@ -231,18 +231,47 @@ describe("workspace flow", () => {
   it("supports browser sign-in and only adds the verified resulting account", async () => {
     const user = userEvent.setup(); render(<App />); await user.click(await screen.findByRole("button",{name:"Add account"}));
     await user.click(screen.getByRole("button",{name:"ChatGPT / Codex"})); await user.click(screen.getByRole("button",{name:/Sign in with ChatGPT/}));
-    await user.type(screen.getByLabelText("Account name"),"Backup"); await user.click(screen.getByRole("button",{name:"Continue in browser"}));
+    expect(screen.queryByLabelText("Account name")).not.toBeInTheDocument(); expect(screen.queryByRole("button",{name:"Continue in browser"})).not.toBeInTheDocument();
     expect(await screen.findByText(/Finish signing in with/)).toBeInTheDocument(); expect(api.commitAccountSetup).not.toHaveBeenCalled();
     expect(opener.openUrl).toHaveBeenCalledWith("https://auth.openai.com/authorize"); await screen.findByText("Account added");
-    expect(api.startSetupLogin).toHaveBeenCalledWith("draft","codex","browser","Backup");
+    expect(api.startSetupLogin).toHaveBeenCalledWith("draft","codex","browser","");
   });
   it("cancels a pending device login and discards its draft on confirmed close", async () => {
     const user = userEvent.setup(); api.startSetupLogin.mockResolvedValue({attemptId:"device",status:"pending",authUrl:"https://auth.openai.com/codex/device",userCode:"ABCD-EFGH",error:null,account:null}); api.pollSetupLogin.mockReturnValue(new Promise(()=>{}));
     render(<App />); await user.click(await screen.findByRole("button",{name:"Add account"}));
     await user.click(screen.getByRole("button",{name:"ChatGPT / Codex"})); await user.click(screen.getByRole("button",{name:/Use a device code/}));
-    await user.type(screen.getByLabelText("Account name"),"Work"); await user.click(screen.getByRole("button",{name:"Get device code"}));
+    expect(screen.queryByLabelText("Account name")).not.toBeInTheDocument(); expect(screen.queryByRole("button",{name:"Get device code"})).not.toBeInTheDocument(); expect(api.startSetupLogin).toHaveBeenCalledWith("draft","codex","device","");
     expect(await screen.findByText("ABCD-EFGH")).toBeInTheDocument(); await user.click(screen.getByRole("button",{name:"Cancel sign-in"})); expect(api.cancelSetupLogin).toHaveBeenCalledWith("draft");
-    await user.click(screen.getByRole("button",{name:"Close"})); await user.click(screen.getByRole("button",{name:"Discard changes"})); await waitFor(()=>expect(api.discardAccountSetup).toHaveBeenCalledWith("draft"));
+    await user.click(screen.getByRole("button",{name:"Close"})); await waitFor(()=>expect(api.discardAccountSetup).toHaveBeenCalledWith("draft"));
+  });
+  it("returns failed direct starts to the method picker and retries only on another choice", async () => {
+    const user = userEvent.setup();
+    api.startSetupLogin.mockRejectedValueOnce(new Error("CLI unavailable"));
+    api.pollSetupLogin.mockReturnValue(new Promise(() => {}));
+    render(<App />); await user.click(await screen.findByRole("button", { name: "Add account" }));
+    await user.click(screen.getByRole("button", { name: "ChatGPT / Codex" }));
+    await user.click(screen.getByRole("button", { name: "Sign in with ChatGPT" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("CLI unavailable");
+    expect(screen.getByRole("group", { name: "Choose sign-in method" })).toBeInTheDocument();
+    expect(api.startSetupLogin).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Sign in with ChatGPT" }));
+    expect(await screen.findByText(/Finish signing in with/)).toBeInTheDocument();
+    expect(api.startSetupLogin).toHaveBeenCalledTimes(2);
+    await user.click(screen.getByRole("button", { name: "Cancel sign-in" }));
+    expect(screen.getByRole("group", { name: "Choose sign-in method" })).toBeInTheDocument();
+  });
+  it("blocks repeated direct starts while the first request is in flight", async () => {
+    const user = userEvent.setup(); let finish!: (login: unknown) => void;
+    api.startSetupLogin.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    api.pollSetupLogin.mockReturnValue(new Promise(() => {}));
+    render(<App />); await user.click(await screen.findByRole("button", { name: "Add account" }));
+    await user.click(screen.getByRole("button", { name: "ChatGPT / Codex" }));
+    await user.dblClick(screen.getByRole("button", { name: "Use a device code" }));
+    expect(api.startSetupLogin).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Starting sign-in…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeDisabled();
+    await act(async () => finish({ attemptId: "direct", status: "pending", authUrl: null, userCode: "ABCD", error: null, account: null }));
+    expect(await screen.findByText("ABCD")).toBeInTheDocument();
   });
   it("provides official Claude login and config-folder choices rather than a Codex file format", async () => {
     const user = userEvent.setup(); render(<App />); await user.click(await screen.findByRole("button",{name:"Add account"}));

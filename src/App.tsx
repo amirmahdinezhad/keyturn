@@ -40,7 +40,7 @@ import { AppModal } from "./components/AppModal";
 import { Select } from "./components/ui/select";
 import { AddIcon } from "./icons";
 import { accountLimitText, nextUsableAccount } from "./accountLimits";
-import { QuotaContent } from "./components/CliProviders";
+import { CodexUsageModal } from "./components/CodexUsageModal";
 import { EmptyState } from "./components/EmptyState";
 import { Toast, type ToastData, type ToastKind } from "./components/Toast";
 import { LimitedSwitchWarning, type LimitedSwitchTarget } from "./components/LimitedSwitchWarning";
@@ -455,11 +455,10 @@ export default function App() {
       {reconnectAccount ? <ReconnectAccount key={`${workspace?.id}:${reconnectAccount.id}`} profile={reconnectAccount} onClose={() => setReconnectId(null)} onProfilesChanged={applyProfiles} notify={notify} /> : null}
       <AppModal open={createOpen} hasUnsavedChanges={createDraft.dirty} busy={createDraft.busy} onClose={() => { setCreateOpen(false); setPreviewAccent(null); }} title="Create workspace" cardClass="workspace-setup-card">{createOpen ? <WorkspaceSetup onAccountAdded={() => notify("Account added", "ok")} step={createStep} onStepChange={setCreateStep} onCreated={imported} onAccentPreview={setPreviewAccent} onStatusChange={setCreateDraft} /> : null}</AppModal>
       <AppModal open={importOpen && !!workspace} hasUnsavedChanges={importDraft.dirty} busy={importDraft.busy} onClose={() => setImportOpen(false)} onBack={() => { setImportOpen(false); setAddOpen(true); }} backLabel="All providers" title="Add Codex account">{importOpen && workspace ? <WorkspaceImportAccount workspace={workspace} onImported={imported} onStatusChange={setImportDraft} /> : null}</AppModal>
-      <AppModal open={!!accountUsage} onClose={() => setAccountUsageId(null)} title="Usage limits" cardClass="usage-card" detail={accountUsage ? <div className="usage-identity"><strong>{accountUsage.name}</strong>{accountUsage.email ? <span>{accountUsage.email}</span> : null}</div> : undefined}>
-        {accountUsage && workspace ? <QuotaContent key={accountUsage.id} ids={["codex"]} emptyHint="No usage data for this account." showRemaining={workspace.usage.showRemaining} providedSets={quotas[accountUsage.id] ? [quotas[accountUsage.id]!] : undefined}
-          loadQuota={() => codexProfileQuota(accountUsage.id)} refreshKey={usageRefreshKey} appearance={state ? codexUsageAppearance(codexAccountPreferences(state.app, accountUsage.id), state.app.usageAppearance) : undefined} notify={notify}
-          onReconnect={() => { setAccountUsageId(null); setReconnectId(accountUsage.id); }} /> : null}
-      </AppModal>
+      {accountUsage && workspace ? <CodexUsageModal key={`${workspace.id}:${accountUsage.id}`} profile={accountUsage} quota={quotas[accountUsage.id]} showRemaining={workspace.usage.showRemaining}
+        refreshKey={usageRefreshKey} appearance={state ? codexUsageAppearance(codexAccountPreferences(state.app, accountUsage.id), state.app.usageAppearance) : undefined} notify={notify}
+        onClose={() => setAccountUsageId(null)} onUsed={() => setUsageRefreshKey((key) => key + 1)}
+        onReconnect={() => { setAccountUsageId(null); setReconnectId(accountUsage.id); }} /> : null}
       <UsageModal
         status={usageFor}
         refreshKey={usageRefreshKey}

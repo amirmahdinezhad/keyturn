@@ -14,22 +14,25 @@ import { accentStyle } from "../displayPrefs";
 import { EmptyState } from "./EmptyState";
 import { LoadingSkeleton } from "./LoadingSkeleton";
 
+const EMPTY_QUOTAS: Record<string, QuotaSet | null> = {};
+
 /** Read saved logins without activation; discard responses from a previous workspace/identity. */
 export function useWorkspaceQuotas(profiles: CodexProfile[], workspaceId: string | undefined, refreshKey: number) {
-  const [quotas, setQuotas] = useState<Record<string, QuotaSet | null>>({});
   const key = profiles.map((p) => `${p.id}:${p.connected}:${p.active}:${p.needsActivation}`).join(",");
+  const requestKey = JSON.stringify([workspaceId, refreshKey, key]);
+  const [snapshot, setSnapshot] = useState<{ key: string; quotas: Record<string, QuotaSet | null> } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    setQuotas({});
-    void Promise.all(profiles.filter((p) => p.connected).map(async (profile) => {
-      let quota: QuotaSet;
-      try { quota = await codexProfileQuota(profile.id); }
-      catch (error) { quota = { provider: "codex", error: prettyError(error) }; }
-      if (!cancelled) setQuotas((old) => ({ ...old, [profile.id]: quota }));
-    }));
+    void Promise.all(profiles.filter((p) => p.connected).map(async (profile): Promise<[string, QuotaSet]> => {
+      try { return [profile.id, await codexProfileQuota(profile.id)]; }
+      catch (error) { return [profile.id, { provider: "codex", error: prettyError(error) }]; }
+    })).then((entries) => {
+      if (!cancelled) setSnapshot({ key: requestKey, quotas: Object.fromEntries(entries) });
+    });
     return () => { cancelled = true; };
-  }, [key, workspaceId, refreshKey]); // Metadata refreshes alone do not refetch an identical identity.
-  return quotas;
+  }, [requestKey]); // Publish the complete batch; metadata-only changes do not refetch.
+  return snapshot?.key === requestKey ? snapshot.quotas : EMPTY_QUOTAS;
+
 }
 
 interface Props {
@@ -52,6 +55,7 @@ export function WorkspaceAccounts({ workspace, profiles, app, quotas, busy, onAd
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const accounts = useMemo(() => workspace.accountIds.map((id) => profiles?.profiles.find((p) => p.id === id)).filter((p): p is CodexProfile => !!p), [workspace.accountIds, profiles]);
   const visible = accounts.filter((p) => !isSubscriptionExpired(p.subscription, now));
+  const loading = !profiles || visible.some((p) => p.connected && quotas[p.id] === undefined);
   const expired = accounts.filter((p) => isSubscriptionExpired(p.subscription, now));
   const activeId = activeProviderAccountId("codex", workspace, visible);
   const knownWindows = Object.fromEntries(accounts.map((p) => [p.id, codexAccountPreferences(app, p.id).knownWindows]));
@@ -59,7 +63,7 @@ export function WorkspaceAccounts({ workspace, profiles, app, quotas, busy, onAd
     <div className="workspace-section-head"><div className="workspace-section-title"><Button size="icon-sm" variant="ghost" aria-label="Workspace settings" title="Workspace settings" onClick={onSettings}><SettingIcon size={16} /></Button></div><Button size="sm" variant="ghost" onClick={onAdd}><AddIcon size={16} />Add account</Button></div>
     {profiles ? <h3 className="provider-group-title"><ProviderLogo provider="codex" />Codex <span className="provider-count" aria-label={`${visible.length} Codex accounts`}>{visible.length}</span></h3> : null}
     {profiles && (workspace.usage.showCodexResets ?? true) ? <CodexResetNotice refreshKey={quotas} settings={{ ...app.codexReset, showProbableResets: workspace.usage.showProbableResets }} /> : null}
-    {!profiles ? <LoadingSkeleton /> : !visible.length ? <EmptyState title="No accounts yet" message="Add an account to this workspace." /> : <div className="workspace-account-list">{visible.map((profile) => {
+    {loading ? <LoadingSkeleton variant="cards" count={visible.length || 3} /> : !visible.length ? <EmptyState title="No accounts yet" message="Add an account to this workspace." /> : <div className="workspace-account-list">{visible.map((profile) => {
       const isActive = profile.id === activeId;
       const quota = quotas[profile.id];
       const limit = profile.active ? accountLimitText(quota, now) : null;
@@ -75,8 +79,10 @@ export function WorkspaceAccounts({ workspace, profiles, app, quotas, busy, onAd
           <Button size="icon-sm" variant="ghost" aria-label={`Manage ${profile.name}`} title="Account settings" onClick={() => onManage(profile.id)}><SettingIcon size={17} /></Button>
         </div>
         </div>
+        {quota?.resetCredits && quota.resetCredits.availableCount > 0 ? <Button className="account-reset-balance" variant="ghost" size="sm" disabled={busy || !profile.connected} onClick={() => onUsage(profile)} aria-label={`${quota.resetCredits.availableCount} ${quota.resetCredits.availableCount === 1 ? "reset" : "resets"} available for ${profile.name}`}><span>{quota.resetCredits.availableCount}</span> {quota.resetCredits.availableCount === 1 ? "reset available" : "resets available"}</Button> : null}
         {!profile.connected ? <p className="workspace-error">{profile.connectionError ?? "Reconnect this account"}</p> : null}
         {limit ? <div className="account-limit-notice" aria-label="Account usage limit"><span><span className="account-limit-label">Limit reached</span>{limit}</span>
+          {quota?.resetCredits && quota.resetCredits.availableCount > 0 && quota.resetCredits.applicableAvailableCount !== 0 ? <Button className="account-limit-reset" size="sm" disabled={busy} onClick={() => onUsage(profile)}>Use reset…</Button> : null}
           <Button size="icon-sm" aria-label="Switch to next available account" title={target ? `Switch to ${target.name}` : "No other account has available capacity"} disabled={busy || !target || !!profiles.switchError} onClick={() => onQuickSwitch(profile.id)}><AccountSwitchIcon size={20} /></Button>
         </div> : null}
       </article>;

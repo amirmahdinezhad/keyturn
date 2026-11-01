@@ -307,7 +307,7 @@ fn quota_in_unlocked(home: &Path) -> Result<crate::quota::QuotaSet, String> {
             provider: "antigravity".into(),
             windows: Some(windows),
             error: None,
-            as_of: Some(chrono::Utc::now().to_rfc3339()),
+            reset_credits: None, as_of: Some(chrono::Utc::now().to_rfc3339()),
         })
 }
 

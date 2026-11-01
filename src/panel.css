@@ -121,7 +121,8 @@ main.providers { padding-bottom: 12px; }
 .modal-detail { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--inset-line); }
 .discard-confirm { gap: 16px; max-width: 354px; }
 .discard-confirm p { margin: 0; color: var(--muted); font-size: 13px; text-align: center; }
-.discard-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.discard-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; gap: 8px; }
+.ak-dialog.discard-confirm .discard-actions .ui-button { width: 100%; height: auto; min-height: 40px; align-self: stretch; padding: 8px 10px; font-size: 12px; line-height: 18px; white-space: normal; }
 .settings-card, .workspace-settings-card { height: min(552px, calc(100dvh - 24px)); }
 .settings-card .app-modal-body, .workspace-settings-card .app-modal-body { flex: 1; }
 .settings-body { padding: 0; }
@@ -555,3 +556,43 @@ main.providers:has(> .workspace-setup) { overflow: hidden; padding-bottom: 0; }
 .workspace-color-threshold-form { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .workspace-color-threshold-form > label { flex: 1; color: var(--muted); font-size: 12px; }
 .workspace-color-threshold-form .ui-button { min-height: 32px; height: 32px; padding: 0 10px; }
+
+/* Account-owned reset balance and review share the existing compact Usage surface. */
+.account-reset-balance.ui-button { width: fit-content; margin-top: 8px; height: 24px; min-height: 24px; padding: 0 7px; gap: 4px; color: var(--accent); font-size: 11px; }
+.account-reset-balance span { font-weight: 600; font-variant-numeric: tabular-nums; }
+.account-limit-reset.ui-button { flex-shrink: 0; min-height: 28px; height: 28px; font-size: 11px; padding: 0 8px; }
+.banked-resets { margin-top: 12px; }
+.banked-reset-title { display: block; margin: 0; font-size: 13px; line-height: 1.4; font-weight: 600; }
+.banked-reset-note { margin: 4px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.banked-resets .ui-select-trigger { width: 100%; margin-bottom: 8px; font-size: 11px; }
+.banked-reset-title, .banked-reset-impact strong { overflow-wrap: anywhere; }
+.banked-reset-review { display: grid; gap: 12px; font-size: 13px; }
+.banked-reset-review p { margin: 0; line-height: 1.5; }
+.banked-reset-impact { display: flex; align-items: center; gap: 8px; }
+.banked-reset-impact svg { color: var(--accent); flex-shrink: 0; }
+.banked-reset-facts { display: grid; gap: 6px; background: var(--inset); border: 1px solid var(--inset-line); border-radius: 8px; padding: 12px; font-size: 12px; overflow-wrap: anywhere; }
+.banked-reset-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 4px; }
+.banked-reset-actions .ui-button { height: 32px; min-height: 32px; padding: 5px 10px; font-size: 12px; }
+.banked-reset-error { color: var(--danger); font-size: 12px; line-height: 1.5; margin: 8px 0; }
+.banked-reset-result { color: var(--ok); font-size: 12px; margin: 0 0 8px; }
+.banked-reset-pending { padding: 10px; margin: 8px 0; background: var(--inset); border-radius: 8px; font-size: 12px; }
+.banked-reset-pending p { margin: 0 0 8px; }
+
+/* Reveal each complete account batch and the whole Usage response together. */
+.account-card-skeletons { display: grid; gap: 8px; }
+.account-card-skeleton { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.account-card-skeleton-row { display: flex; gap: 16px; align-items: center; }
+.account-card-skeleton-row > div:first-child { flex: 1; }
+.account-card-skeleton-row .account-skeleton-name { width: 65%; height: 13px; margin-bottom: 8px; }
+.account-card-skeleton-row .account-skeleton-email { width: 90%; height: 10px; }
+.account-card-skeleton-actions { width: 64px; height: 20px; border-radius: 5px; flex-shrink: 0; }
+.account-card-skeleton-reset { width: 108px; height: 16px; margin-top: 16px; border-radius: 4px; }
+.banked-reset-card { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 12px; background: var(--inset); border: 1px solid var(--inset-line); border-radius: 10px; }
+.banked-reset-card-copy { display: grid; gap: 4px; min-width: 0; }
+.banked-reset-expiry { color: var(--muted); font-size: 11px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.banked-reset-card .banked-reset-use.ui-button { width: auto; min-height: 28px; height: 28px; padding: 0 8px; font-size: 11px; border-radius: 6px; white-space: nowrap; }
+.banked-reset-card .banked-reset-refresh.ui-button { width: 26px; min-height: 26px; height: 26px; padding: 0; color: var(--muted); }
+.banked-reset-skeleton { grid-template-columns: minmax(0, 1fr) auto; margin-top: 12px; }
+.banked-reset-skeleton-title { width: 85%; height: 13px; margin-bottom: 8px; border-radius: 4px; }
+.banked-reset-skeleton-expiry { width: 55%; height: 10px; border-radius: 4px; }
+.banked-reset-skeleton-action { width: 70px; height: 28px; border-radius: 6px; }

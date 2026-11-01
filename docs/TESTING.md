@@ -472,3 +472,89 @@ Verify the reset's deletion boundaries with `node --test scripts/reset-data.test
   connection to port 5174. No frontend source changed, so frontend source/HMR
   checks were not needed. No real account or workspace preference was changed
   during verification; the native rendering assertions use synthetic samples.
+
+## Banked resets (2026-11-01)
+
+- TypeScript passed. Vitest: 28 files / 287 tests passed, including explicit
+  confirmation, cancellation, selection, inactive-account reads, disabled
+  eligibility, failure versus zero, duplicate clicks and recovery of an unknown
+  attempt. Consumption in these tests uses synthetic IPC responses.
+- Offline Cargo check passed. Rust: 196 library tests and 8 integration tests
+  passed; 3 existing opt-in tests remained ignored. New native tests cover
+  server eligibility, coverage, expiry ordering, missing/malformed metadata,
+  identity mismatch, validation/storage failures, persistence before POST,
+  process-restart replay and duplicate requests without real network mutations.
+- The two live Codex GET endpoints returned HTTP 200. Native Usage displayed
+  account-owned balances, exact local expiry and covered windows. The active
+  account's server-ineligible reset stayed visible with a disabled action.
+  An inactive account reached the native review step without activation; Cancel
+  returned to Usage and its balance remained unchanged. No real reset was used.
+- UI automation could not keep the regular blur-dismissed tray window focused.
+  Native visual checks therefore used a temporary debug app with the same
+  frontend on port 5174 and the same native commands, a separate window label
+  that stays open on blur, and a private isolated copy of local account state.
+  The installed app was not replaced. The temporary app and account copies were
+  removed after the check.
+- Served App, API, account-card and Usage sources contained the new feature.
+  The plain browser showed the expected missing-IPC empty state. Browser
+  previews were moved off 5174; established WebKit connections and fresh HMR
+  updates confirmed native delivery. Usage retained the review through HMR,
+  then rendered the updated balance/action arrangement after Cancel.
+- The regular Tauri dev watcher rebuilt the normal configuration and launched
+  a new debug PID. Release version checks and all 4 release-script tests passed
+  for proposed 1.1.0. No release tag or publication was performed.
+
+### Banked reset loading and card polish (2026-11-01)
+
+- TypeScript passed; Vitest: 29 files / 294 tests passed. Added deferred-response
+  coverage for atomic workspace quota batches and shared Usage loading, including
+  cached quota, failed batch members, refresh-to-zero, relative expiry and hidden
+  ineligibility copy. Existing explicit-consumption safeguards still pass.
+- Native QA on port 5174 showed account-card skeletons before the complete batch,
+  and a shared Usage skeleton before quota windows and reset inventory appeared
+  together. The final inset reset card retained the exact Codex title, showed
+  `Expires in 29d 3h`, and used a 28px Use reset action. No restore paragraph,
+  ineligibility paragraph or zero-balance section appears in the normal card.
+- Visual review used the same native commands/frontend with an isolated private
+  copy of account state in a temporary debug app. No real reset was consumed.
+  The temporary app and private account copies were removed after verification.
+- Served sources and native WebKit HMR were verified; the plain browser retained
+  its expected missing-IPC empty state and was moved off 5174 for the HMR check.
+  Release checks and all 4 release-script tests passed. This polish remains part
+  of the unpublished proposed 1.1.0 release; no tag or release was published.
+- This follow-up changed frontend code and docs only; native build completed for
+  QA without changing Rust behavior.
+
+### Automatic names for Codex sign-in (2026-11-01)
+
+- Browser and device-code enrollment no longer ask for an account name. Both
+  submit an empty draft label, then use the verified login's existing
+  name → email → ChatGPT account fallback. Claude/Google naming and later
+  account renaming are unchanged.
+- TypeScript and all 294 Vitest tests passed. Updated end-to-end UI tests cover
+  nameless browser/device requests and clean dismissal after a cancelled login.
+  Offline Cargo check and all 6 account-setup tests passed, including blank-name
+  acceptance for Codex and validation for other providers.
+- A native debug QA window on 5174, using synthetic workspace state and no copied
+  credentials, showed Continue in browser and Get device code enabled with no
+  Account name field. Verification stopped before starting real sign-in.
+  Served-source/browser checks and a connected native WebKit HMR update were
+  verified. The ordinary Tauri watcher rebuilt and launched a new debug process.
+- Release checks and all 4 release-script tests passed for the still-unpublished
+  proposed 1.1.0 release. Temporary QA files were removed after the check.
+
+### Direct login and equal discard actions (2026-11-01)
+
+- TypeScript and all 296 Vitest tests passed. Browser/device tests now assert
+  immediate requests from method selection with no Continue/Get code button.
+  New cases cover failed-start retry and duplicate clicks during startup;
+  cancellation returns to the method picker.
+- Native visual QA on port 5174 used the production enrollment and modal
+  components with a disposable synthetic draft. Device selection went directly
+  through Starting sign-in to its code. The discard dialog showed equal-width,
+  equal-height buttons despite the global destructive-button style.
+- No real sign-in or account mutation was performed. The disposable fixture,
+  native QA app and synthetic state were removed after verification.
+- Served sources, the plain browser's expected missing-IPC state and a fresh
+  native WebKit HMR update were checked. Release checks and all four release
+  tests passed for the still-unpublished proposed 1.1.0 release.

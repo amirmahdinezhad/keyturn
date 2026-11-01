@@ -189,6 +189,41 @@ export interface QuotaSet {
   windows?: QuotaWindow[] | null;
   error?: string | null;
   asOf?: string | null;
+  resetCredits?: { availableCount: number; applicableAvailableCount?: number | null; planType: string } | null;
+}
+
+export interface BankedResetCredit {
+  id: string;
+  title: string;
+  expiresAt: string | null;
+  coveredWindows: string[];
+  canUse: boolean;
+  unavailableReason: string | null;
+}
+
+export interface BankedResetInventory {
+  availableCount: number;
+  credits: BankedResetCredit[];
+  usage: QuotaSet;
+  pendingCredit: BankedResetCredit | null;
+}
+
+export interface BankedResetReview { token: string; credit: BankedResetCredit; retry: boolean }
+export interface BankedResetResult { code: "reset" | "nothing_to_reset" | "no_credit" | "already_redeemed"; windows_reset: number }
+
+/** Read saved-account inventory and eligibility without activating or redeeming. */
+export function codexBankedResets(id: string): Promise<BankedResetInventory> {
+  return invoke("codex_banked_resets", { id });
+}
+
+/** Recheck a selected reset and pin its account/impact for a separate confirmation. */
+export function prepareCodexReset(id: string, creditId: string): Promise<BankedResetReview> {
+  return invoke("prepare_codex_reset", { id, creditId });
+}
+
+/** Spend only the reviewed reset after the user explicitly confirms in Usage. */
+export function consumeCodexReset(id: string, reviewToken: string): Promise<BankedResetResult> {
+  return invoke("consume_codex_reset", { id, reviewToken });
 }
 
 /** Read all available quota sources; callers filter the result for their popup. */

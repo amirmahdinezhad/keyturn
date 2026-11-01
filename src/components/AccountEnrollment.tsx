@@ -26,6 +26,7 @@ export function useAccountEnrollment() {
   const loadedIds = useRef<string[]>([]);
   const [revision, setRevision] = useState(0);
   const [editing, setEditing] = useState(false);
+  const startingLogin = useRef(false);
   const getSession = useCallback(() => {
     if (!session.current) session.current = beginAccountSetup().catch((error) => { session.current = null; throw error; });
     return session.current;
@@ -83,20 +84,22 @@ export function useAccountEnrollment() {
     finally { if (mounted.current) setBusy(false); }
   };
   const start = async (provider: AccountProvider, method: string, name: string) => {
-    if (busy || login?.status === "pending") return;
+    if (startingLogin.current || busy || login?.status === "pending") return false;
+    startingLogin.current = true;
     setBusy(true); setError(null);
     try {
       const login = await startSetupLogin(await getSession(), provider, method, name);
-      if (!mounted.current) return;
+      if (!mounted.current) return false;
       setLogin(login);
       if (login.authUrl) void openUrl(login.authUrl).catch(() => setError("Couldn’t open your browser. Use Open sign-in page below."));
-    } catch (error) { if (mounted.current) setError(prettyError(error)); }
-    finally { if (mounted.current) setBusy(false); }
+      return true;
+    } catch (error) { if (mounted.current) setError(prettyError(error)); return false; }
+    finally { startingLogin.current = false; if (mounted.current) setBusy(false); }
   };
   const cancel = async () => {
     setBusy(true);
-    try { await cancelSetupLogin(await getSession()); setLogin(null); setError(null); }
-    catch (error) { setError(prettyError(error)); }
+    try { await cancelSetupLogin(await getSession()); setLogin(null); setError(null); return true; }
+    catch (error) { setError(prettyError(error)); return false; }
     finally { setBusy(false); }
   };
   const commit = async (name: string, accent: string, workspaceId?: string) => {
@@ -168,6 +171,13 @@ export function AccountEnrollment({ draft, onAdded, initiallyOpen = false, embed
     }
   }, [draft.revision, draft.setEditing, onAdded]);
   const close = () => { setOpen(false); setName(""); setFile(null); setPath(""); setCode(""); draft.setEditing(false); draft.setError(null); };
+  const chooseMethod = async (choice: string) => {
+    if (!provider || locked) return;
+    setMethod(choice); draft.setError(null);
+    if (provider === "codex" && (choice === "browser" || choice === "device")) {
+      if (!await draft.start(provider, choice, "")) setMethod(null);
+    }
+  };
   const content = <div className="account-enrollment setup-page" key={`${provider ?? "providers"}:${method ?? "methods"}`}>
 
     {draft.error ? <p className="workspace-error" role="alert">{draft.error}</p> : null}
@@ -175,11 +185,11 @@ export function AccountEnrollment({ draft, onAdded, initiallyOpen = false, embed
     {!provider ? <div className="enrollment-choices" role="group" aria-label="Choose provider">{(Object.keys(PROVIDER_LABELS) as AccountProvider[]).map((id) => <Button key={id} variant="ghost" className="enrollment-choice" aria-label={PROVIDER_LABELS[id]} onClick={() => { setProvider(id); }}>
       <ProviderLogo provider={id} /><span><strong>{PROVIDER_LABELS[id]}</strong><span>{id === "antigravity" ? "Google subscriptions · Experimental" : "Subscription accounts"}</span></span><NextIcon size={18} />
     </Button>)}</div>
-    : !method ? <div className="enrollment-choices" role="group" aria-label="Choose sign-in method">{METHODS[provider].map((choice) => <Button key={choice.id} variant="ghost" className="enrollment-choice" aria-label={choice.title} onClick={() => { setMethod(choice.id); draft.setError(null); }}><KeyIcon size={20} /><span><strong>{choice.title}</strong><span>{choice.detail}</span></span><NextIcon size={18} /></Button>)}</div>
+    : !method ? <div className="enrollment-choices" role="group" aria-label="Choose sign-in method">{METHODS[provider].map((choice) => <Button key={choice.id} variant="ghost" className="enrollment-choice" aria-label={choice.title} disabled={locked} onClick={() => void chooseMethod(choice.id)}><KeyIcon size={20} /><span><strong>{choice.title}</strong><span>{choice.detail}</span></span><NextIcon size={18} /></Button>)}</div>
     : <>
       {provider === "antigravity" ? <p className="enrollment-notice">Experimental integration. Identity and a paid Google plan must be verified before this account is added.</p> : null}
       <>
-        {!(provider === "codex" && method === "file") ? <label className="enrollment-name">Account name<input aria-label="Account name" autoFocus value={name} maxLength={64} disabled={locked} placeholder="Personal" onChange={(e) => setName(e.target.value)} /></label> : null}
+        {provider !== "codex" ? <label className="enrollment-name">Account name<input aria-label="Account name" autoFocus value={name} maxLength={64} disabled={locked} placeholder="Personal" onChange={(e) => setName(e.target.value)} /></label> : null}
         {method === "file" ? <>
           <AuthFileInput value={file} fileLabel={provider === "codex" ? "auth.json" : "credentials.json"} disabled={locked} onReadingChange={setReading} onChange={setFile} />
 
@@ -193,8 +203,8 @@ export function AccountEnrollment({ draft, onAdded, initiallyOpen = false, embed
           {draft.login?.userCode ? <div className="enrollment-code"><code>{draft.login.userCode}</code><Button size="sm" onClick={() => void navigator.clipboard.writeText(draft.login!.userCode!)}>Copy code</Button></div> : null}
           {draft.login?.authUrl ? <Button onClick={() => void openUrl(draft.login!.authUrl!).catch((e) => draft.setError(prettyError(e)))}>Open sign-in page</Button> : <p>Waiting for the CLI to open your browser…</p>}
           {provider === "claude" ? <details><summary>Browser shows an authorization code?</summary><label>Authorization code<input aria-label="Authorization code" value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" /></label><Button size="sm" disabled={!code.trim() || draft.busy} onClick={() => void draft.getSession().then((session) => submitSetupCode(session, code.trim())).then(() => setCode("")).catch((e) => draft.setError(prettyError(e)))}>Send code to Claude Code</Button></details> : null}
-          <Button variant="ghost" disabled={draft.busy} onClick={() => void draft.cancel()}>Cancel sign-in</Button>
-        </div> : <Button variant="default" disabled={locked || !name.trim()} onClick={() => void draft.start(provider, method, name.trim())}>{draft.busy ? "Starting…" : method === "device" ? "Get device code" : "Continue in browser"}</Button>}
+          <Button variant="ghost" disabled={draft.busy} onClick={() => void draft.cancel().then((cancelled) => { if (cancelled && provider === "codex") setMethod(null); })}>Cancel sign-in</Button>
+        </div> : provider === "codex" ? <div className="enrollment-login" role="status"><strong>Starting sign-in…</strong></div> : <Button variant="default" disabled={locked || !name.trim()} onClick={() => void draft.start(provider, method, name.trim())}>{draft.busy ? "Starting…" : "Continue in browser"}</Button>}
       </>
     </>}
     </div>;

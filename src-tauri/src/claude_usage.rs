@@ -190,7 +190,7 @@ pub fn claude_quota_in(config: &Path) -> Option<QuotaSet> {
                 .collect(),
         ),
         error: None,
-        as_of: Some(limits.as_of),
+        reset_credits: None, as_of: Some(limits.as_of),
     })
 }
 
@@ -304,8 +304,8 @@ pub fn current_quota_in(config: &Path) -> QuotaSet {
 
 fn current_quota_with(fetch: impl FnOnce() -> Result<Vec<QuotaWindow>, String>) -> QuotaSet {
     match fetch() {
-        Ok(windows) => QuotaSet { provider: "claude".into(), windows: Some(windows), error: None, as_of: Some(chrono::Utc::now().to_rfc3339()) },
-        Err(error) => QuotaSet { provider: "claude".into(), windows: None, error: Some(error), as_of: None },
+        Ok(windows) => QuotaSet { provider: "claude".into(), windows: Some(windows), error: None, reset_credits: None, as_of: Some(chrono::Utc::now().to_rfc3339()) },
+        Err(error) => QuotaSet { provider: "claude".into(), windows: None, error: Some(error), reset_credits: None, as_of: None },
     }
 }
 
@@ -315,13 +315,13 @@ fn quota_with(config: &Path, fetch: impl FnOnce() -> Result<Vec<QuotaWindow>, St
             provider: "claude".into(),
             windows: Some(windows),
             error: None,
-            as_of: Some(chrono::Utc::now().to_rfc3339()),
+            reset_credits: None, as_of: Some(chrono::Utc::now().to_rfc3339()),
         },
         Err(error) => claude_quota_in(config).unwrap_or(QuotaSet {
             provider: "claude".into(),
             windows: None,
             error: Some(error),
-            as_of: None,
+            reset_credits: None, as_of: None,
         }),
     }
 }

@@ -10,6 +10,13 @@ upload. Claude can connect an existing signed-in configuration. Experimental
 Antigravity support offers Google sign-in, current AGY login and credentials JSON.
 Only verified paid subscription accounts can enter the new workspace flow.
 
+Codex browser and device-code sign-in start directly from the method picker,
+without an intermediate Continue/Get code screen. Cancelling returns to the
+picker; failed starts show the error there and allow another explicit attempt.
+Both methods use the verified identity name automatically,
+falling back to email or ChatGPT account when no name is present. Account names
+remain editable later in Account settings.
+
 Saved Codex accounts renew expired usage sessions through the CLI automatically.
 If a copied session can no longer be renewed, use **Reconnect account → Replace
 login** to import a fresh auth.json without switching the active account.
@@ -84,6 +91,13 @@ API receives no account details or credentials. Successful responses and failure
 share the selected cache lifetime. Possible resets are enabled by default and
 can be hidden separately from announcements. Expired forecasts disappear;
 source freshness accommodates the selected interval.
+
+## Banked resets
+
+Each Codex card shows its account-owned reset balance when nonzero. Usage limits
+reviews expiry, affected allowances and eligibility before a separate confirmation.
+Inactive accounts work without activation. See [Banked resets](banked-resets.md)
+for the API contract, persisted retry IDs and verification boundaries.
 
 ## Development
 

@@ -122,3 +122,60 @@ Native menu-bar identity follows the workspace accent across logo, initials,
 values and progress, with warning colors taking priority. Account-card accents
 remain independently saved. Unavailable values and time ticks keep semantic
 muted/neutral styling.
+
+## Banked reset review (2026-11-01)
+
+A quiet clickable balance appears below each Codex account identity. Usage adds
+Available resets below the existing limit windows, then replaces its body with
+an account-specific confirmation. Keep the same modal and identity; Cancel and
+Back return to Usage. Confirmation receives keyboard focus on Cancel.
+
+Available resets sort by usability and nearest expiration. The user can change
+the selection. Zero is absent from both Usage and the account card. Unknown
+balance is an error with Retry. Ineligible resets retain their title and countdown
+and show a disabled action without an explanatory paragraph. An unresolved redemption blocks a different
+reset and offers Check previous attempt. After a recognized outcome, keep Usage
+open and refetch balances and windows.
+
+References inspected in Mobbin: [Firecrawl Usage](https://mobbin.com/screens/4aa89c74-3071-4189-ae9a-1b1bef2007cb)
+for balance next to capacity, and [Coda confirmation](https://mobbin.com/screens/43079a19-7b46-40de-b67e-da226f4a0372)
+for account-impact review. Adapt these patterns to the current panel tokens;
+use the normal primary action color for redemption.
+
+### Coordinated loading and compact reset cards
+
+Account rows wait for the complete workspace quota batch, then reveal identity,
+actions and balance together. Matching card skeletons reserve the identity and
+balance area. A failed account settles its batch with an error rather than
+holding the other cards in loading indefinitely. Usage uses one skeleton for
+its windows and reset inventory; cached quota never renders ahead of inventory.
+
+Keep the existing system font and graphite palette: background #191b1f, card
+#23262b, text #f1f3f5, secondary #a8b0bd, border #383e47, blue #0070eb.
+The reset card uses an inset surface, a quiet border and 10px corners. Its
+13px semibold server title leads, followed by 11px remaining redemption time.
+Use reset is 28px high with 11px text; the refresh icon is 26px. No repeated
+balance heading, restore paragraph, fixed date, or ineligibility paragraph.
+The confirmation still reviews the affected allowances before any mutation.
+
+```text
+Loading: [ quota skeletons ]       Ready: [ 5-hour / Weekly ]
+         [ reset card skeleton ]         [ Full reset (Weekly + 5 hr)  Use reset ]
+                                         [ Expires in 29d 4h                    ]
+```
+
+The card treatment carries the reset's own identity and deadline; the rest of
+the panel keeps its established hierarchy. This avoids a second dashboard-like
+balance heading competing with the quota values.
+
+### Direct Codex login and discard actions
+
+Codex browser/device selection starts the selected method immediately. A short
+Starting sign-in state transitions to the existing pending-login screen; there
+is no second confirmation button. A failed start returns to the method picker
+with its error. Cancellation returns to the picker. In-flight starts lock the
+choices and use a synchronous guard against duplicate requests.
+
+Discard confirmation uses two equal grid columns and a shared 40px minimum
+height, typography and padding. Its scoped button rule takes precedence over
+the global destructive-action rule so both controls stretch equally.

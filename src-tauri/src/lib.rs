@@ -8,6 +8,7 @@ pub mod claude_usage;
 pub mod codex;
 mod codex_refresh;
 pub mod codex_resets;
+mod banked_resets;
 pub mod paths;
 pub mod profiles;
 pub mod claude_profiles;
@@ -490,6 +491,21 @@ async fn codex_profile_quota(id: String) -> Result<quota::QuotaSet, String> {
 }
 
 #[tauri::command]
+async fn codex_banked_resets(id: String) -> Result<banked_resets::ResetInventory, String> {
+    tauri::async_runtime::spawn_blocking(move || banked_resets::inventory(&id)).await.map_err(|_| "Cannot read banked resets.")?
+}
+
+#[tauri::command]
+async fn prepare_codex_reset(id: String, credit_id: String) -> Result<banked_resets::ResetReview, String> {
+    tauri::async_runtime::spawn_blocking(move || banked_resets::prepare(&id, &credit_id)).await.map_err(|_| "Cannot review this reset.")?
+}
+
+#[tauri::command]
+async fn consume_codex_reset(id: String, review_token: String) -> Result<banked_resets::ConsumeResult, String> {
+    tauri::async_runtime::spawn_blocking(move || banked_resets::consume(&id, &review_token)).await.map_err(|_| "Reset result is unknown. Review the same reset to check its result.")?
+}
+
+#[tauri::command]
 async fn start_codex_profile_login(id: String) -> Result<profile_login::LoginStatus, String> {
     tauri::async_runtime::spawn_blocking(move || profile_login::start(&id)).await
         .map_err(|_| "Cannot start sign-in.".to_string())?
@@ -704,6 +720,9 @@ pub fn run() {
             codex_account_status,
             codex_account_quota,
             codex_profile_quota,
+            codex_banked_resets,
+            prepare_codex_reset,
+            consume_codex_reset,
             start_codex_profile_login,
             codex_profile_login_status,
             cancel_codex_profile_login,

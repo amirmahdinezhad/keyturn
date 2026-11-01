@@ -912,7 +912,7 @@ mod tests {
         QuotaSet {
             provider: "codex".into(),
             error: None,
-            as_of: None,
+            reset_credits: None, as_of: None,
             windows: Some(
                 windows
                     .iter()
@@ -1379,7 +1379,7 @@ mod tests {
     #[test]
     fn switch_threshold_uses_remaining_capacity_and_rejects_targets_inside_threshold() {
         let now = chrono::Utc::now();
-        let quota = |used| QuotaSet { provider: "codex".into(), windows: Some(vec![crate::quota::QuotaWindow { window: "weekly".into(), percent: used, resets_at: Some((now + chrono::Duration::hours(1)).to_rfc3339()), status: None }]), error: None, as_of: None };
+        let quota = |used| QuotaSet { provider: "codex".into(), windows: Some(vec![crate::quota::QuotaWindow { window: "weekly".into(), percent: used, resets_at: Some((now + chrono::Duration::hours(1)).to_rfc3339()), status: None }]), error: None, reset_credits: None, as_of: None };
         let mut samples = vec![ProfileUsage { id: "first".into(), name: "First".into(), active: true, provider: "codex".into(), quota: Some(quota(97.9)) }, ProfileUsage { id: "second".into(), name: "Second".into(), active: false, provider: "codex".into(), quota: Some(quota(10.0)) }];
         let mut settings = AppSettings::default();
         for id in ["first", "second"] { settings.codex_accounts.insert(id.into(), CodexAccountPreferences { auto_switch: true, ..Default::default() }); }

@@ -38,6 +38,27 @@ pub struct QuotaSet {
     /// Absent for live probes (OpenCode), which are always current.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub as_of: Option<String>,
+    /// Account-owned reset balance from live Codex usage, absent on older backends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reset_credits: Option<ResetCreditsSummary>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetCreditsSummary {
+    pub available_count: u32,
+    pub applicable_available_count: Option<u32>,
+    pub plan_type: String,
+}
+
+/// Keep missing or malformed reset metadata unknown; never fabricate a zero balance.
+fn reset_summary(json: &serde_json::Value) -> Option<ResetCreditsSummary> {
+    let summary = json.get("rate_limit_reset_credits")?;
+    Some(ResetCreditsSummary {
+        available_count: u32::try_from(summary.get("available_count")?.as_u64()?).ok()?,
+        applicable_available_count: summary.get("applicable_available_count").and_then(|v| v.as_u64()).and_then(|v| u32::try_from(v).ok()),
+        plan_type: json.get("plan_type").and_then(|v| v.as_str()).unwrap_or("").to_owned(),
+    })
 }
 
 /// auth.json entry → quota base URL. Only these two have a usage endpoint.
@@ -97,7 +118,7 @@ fn fetch_entry(entry_id: &str, base: &str, api_key: &str) -> QuotaSet {
         provider: entry_id.to_string(),
         windows: None,
         error: Some(error),
-        as_of: None,
+        reset_credits: None, as_of: None,
     };
     let client = match reqwest::blocking::Client::builder()
         .user_agent(concat!("Keyturn/", env!("CARGO_PKG_VERSION")))
@@ -135,7 +156,7 @@ fn fetch_entry(entry_id: &str, base: &str, api_key: &str) -> QuotaSet {
             provider: entry_id.to_string(),
             windows: Some(windows),
             error: None,
-            as_of: None,
+            reset_credits: None, as_of: None,
         },
         None => fail("unexpected usage payload".to_string()),
     }
@@ -225,7 +246,7 @@ pub fn codex_quota_from_auth(raw: &serde_json::Value) -> Option<QuotaSet> {
         provider: "codex".to_string(),
         windows: None,
         error: Some(error),
-        as_of: None,
+        reset_credits: None, as_of: None,
     };
     if let Some(exp) = expires_at {
         let now = SystemTime::now()
@@ -328,13 +349,26 @@ pub fn codex_quota_from_auth(raw: &serde_json::Value) -> Option<QuotaSet> {
         provider: "codex".to_string(),
         windows: Some(windows),
         error: None,
-        as_of: None,
+        reset_credits: reset_summary(&json), as_of: None,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn banked_reset_summary_keeps_missing_and_invalid_counts_unknown() {
+        use serde_json::json;
+        assert!(reset_summary(&json!({"plan_type":"plus"})).is_none());
+        assert!(reset_summary(&json!({"rate_limit_reset_credits":{"available_count":-1}})).is_none());
+        let summary=reset_summary(&json!({"plan_type":"plus","rate_limit_reset_credits":{"available_count":1,"applicable_available_count":0}})).unwrap();
+        let wire=serde_json::to_value(summary).unwrap();
+        assert_eq!(wire["availableCount"],1);
+        assert_eq!(wire["applicableAvailableCount"],0);
+        assert_eq!(wire["planType"],"plus");
+        assert_eq!(reset_summary(&json!({"rate_limit_reset_credits":{"available_count":0}})).unwrap().available_count,0);
+    }
 
     #[test]
     fn quota_base_covers_only_the_two_zen_entries() {

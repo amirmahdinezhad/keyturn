@@ -1,5 +1,5 @@
 cask "keyturn" do
-  version "1.0.0"
+  version "1.1.0"
   sha256 "REPLACE_WITH_DMG_SHA256"
 
   url "https://github.com/amirmahdinezhad/keyturn/releases/download/v#{version}/Keyturn_#{version}_universal.dmg",

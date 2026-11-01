@@ -33,7 +33,7 @@ signed-in subscription are required for their account and usage features.
 
 | Mac | Installer |
 | --- | --- |
-| Apple Silicon (M1 and newer) | [Download Keyturn DMG](https://github.com/amirmahdinezhad/keyturn/releases/latest/download/Keyturn_1.0.0_universal.dmg) |
+| Apple Silicon (M1 and newer) | [Download Keyturn DMG](https://github.com/amirmahdinezhad/keyturn/releases/latest/download/Keyturn_1.1.0_universal.dmg) |
 | Intel | The same universal DMG |
 
 1. Download and open the DMG.
@@ -90,7 +90,7 @@ OpenCode و Gemini نصب‌شده و واردشده نیز شناسایی می�
 برای نصب بستهٔ آماده به Node.js، Rust یا حساب گیت‌هاب نیازی ندارید.
 قابلیت‌های هر سرویس به CLI و اشتراک واردشدهٔ پشتیبانی‌شدهٔ همان سرویس نیاز دارند.
 
-[دانلود Keyturn برای هر دو نوع مک](https://github.com/amirmahdinezhad/keyturn/releases/latest/download/Keyturn_1.0.0_universal.dmg)
+[دانلود Keyturn برای هر دو نوع مک](https://github.com/amirmahdinezhad/keyturn/releases/latest/download/Keyturn_1.1.0_universal.dmg)
 
 1. فایل DMG را دانلود و باز کنید.
 2. **Keyturn** را به **Applications** بکشید و اجرا کنید.

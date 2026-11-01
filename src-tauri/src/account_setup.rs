@@ -104,6 +104,11 @@ fn account_name(raw: &str) -> Result<String, String> {
     }
     Ok(name.into())
 }
+/// Codex receives its display label from the verified login, including browser/device sign-in.
+fn enrollment_name(provider: &str, raw: &str) -> Result<String, String> {
+    if provider == "codex" && raw.trim().is_empty() { Ok(String::new()) }
+    else { account_name(raw) }
+}
 fn inspect(
     provider: &str,
     home: &Path,
@@ -361,7 +366,7 @@ pub fn import(
     credentials: Option<String>,
     path: Option<String>,
 ) -> Result<Account, String> {
-    let name = if provider == "codex" && name.trim().is_empty() { String::new() } else { account_name(name)? };
+    let name = enrollment_name(provider, name)?;
     if !matches!(provider, "codex" | "antigravity") {
         return Err("For Claude, use CLI sign-in or connect a configuration directory.".into());
     }
@@ -398,7 +403,7 @@ pub fn connect_config(id: &str, name: &str, path: &str) -> Result<Account, Strin
     })
 }
 pub fn start(id: &str, provider: &str, method: &str, name: &str) -> Result<LoginResult, String> {
-    let name = account_name(name)?;
+    let name = enrollment_name(provider, name)?;
     if !matches!(
         (provider, method),
         ("codex", "browser" | "device") | ("claude", "browser") | ("antigravity", "browser")
@@ -627,10 +632,20 @@ mod tests {
         root
     }
     #[test]
+    fn codex_sign_in_defers_blank_names_to_verified_identity() {
+        assert_eq!(enrollment_name("codex", "").unwrap(), "");
+        assert_eq!(enrollment_name("codex", "  ").unwrap(), "");
+        assert_eq!(enrollment_name("codex", " Work ").unwrap(), "Work");
+        assert!(enrollment_name("claude", "").is_err());
+        assert!(enrollment_name("antigravity", "").is_err());
+        assert!(enrollment_name("codex", &"x".repeat(65)).is_err());
+    }
+
+    #[test]
     fn failed_or_empty_usage_is_excluded_but_limited_accounts_are_valid() {
         use crate::quota::{QuotaSet, QuotaWindow};
         assert!(require_loaded_usage(None).is_err());
-        let mut quota = QuotaSet { provider: "codex".into(), windows: Some(vec![]), error: None, as_of: None };
+        let mut quota = QuotaSet { provider: "codex".into(), windows: Some(vec![]), error: None, reset_credits: None, as_of: None };
         assert!(require_loaded_usage(Some(&quota)).is_err());
         quota.windows = Some(vec![QuotaWindow { window: "weekly".into(), percent: 100.0, resets_at: None, status: None }]);
         assert!(require_loaded_usage(Some(&quota)).is_ok());
